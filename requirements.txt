@@ -1,0 +1,6 @@
+streamlit>=1.40
+openai>=1.50
+rapidfuzz>=3.9
+pillow>=11.0
+pydantic>=2.7
+pandas>=2.2

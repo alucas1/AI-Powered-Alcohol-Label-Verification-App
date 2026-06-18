@@ -1,0 +1,8 @@
+# Project-level Streamlit config; picked up when the app is run from the repo root.
+
+[theme]
+base = "light"
+primaryColor = "#1f6feb"
+
+[server]
+maxUploadSize = 25
