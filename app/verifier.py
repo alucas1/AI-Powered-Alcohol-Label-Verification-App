@@ -222,10 +222,10 @@ def _compare_warning(field: str, expected, extracted) -> FieldResult:
                        f"Government warning does not match the required statement word-for-word ({score:.0f}% similar).")
 
 
-# The visual formatting of the warning — bold header, type size, placement,
-# separation — can't be judged from a text transcription. This note explains the
-# limitation; the UI surfaces it as a manual-confirmation step rather than a
-# false PASS, an honest hand-off to a human.
+# The visual formatting of the warning (bold header, type size, placement,
+# separation) can't be judged from a text transcription. The UI surfaces this as
+# a manual-confirmation step rather than letting the model emit a false PASS on
+# the most legally sensitive field.
 VISUAL_FORMAT_NOTE = (
     "Wording and capitalization are verified automatically. A reviewer must still "
     "confirm the visual formatting by eye: bold 'GOVERNMENT WARNING:', legible "
