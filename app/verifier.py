@@ -103,19 +103,51 @@ def _compare_fuzzy(field: str, expected, extracted) -> FieldResult:
                        f"Does not match (only {score:.0f}% similar).")
 
 
-_ABV_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
-_PROOF_RE = re.compile(r"(\d+(?:\.\d+)?)\s*proof", re.IGNORECASE)
+# A number with either a period or comma as the decimal separator, so a
+# European-style "13,5%" reads the same as "13.5%".
+_NUMBER = r"\d+(?:[.,]\d+)?"
+_PERCENT_RE = re.compile(rf"({_NUMBER})\s*%")
+_PROOF_RE = re.compile(rf"({_NUMBER})\s*proof", re.IGNORECASE)
+
+# Words that mark a percentage as the alcohol-by-volume figure rather than an
+# unrelated one (e.g. "100% Agave"), matched within a small window of the "%".
+_ABV_KEYWORDS = ("alc", "abv", "vol")
+_ABV_ANCHOR_WINDOW = 12
+
+
+def _to_float(number: str) -> float:
+    """Parse a number string, accepting a comma decimal separator."""
+    return float(number.replace(",", "."))
 
 
 def _parse_alcohol(text: str):
-    """Return (abv_percent, proof) as floats; either may be None."""
-    abv = proof = None
-    m = _ABV_RE.search(text)
-    if m:
-        abv = float(m.group(1))
-    m = _PROOF_RE.search(text)
-    if m:
-        proof = float(m.group(1))
+    """Return (abv_percent, proof) as floats; either may be None.
+
+    A label can print more than one percentage — "100% Agave ... 40% Alc./Vol."
+    Prefer the percentage anchored to an alcohol keyword; fall back to the lone
+    percentage when there's only one. When several are present and none is
+    anchored, leave ABV unset so the comparison defers to manual review rather
+    than guessing the wrong figure.
+    """
+    low = text.lower()
+    percents = list(_PERCENT_RE.finditer(text))
+    anchored = [
+        m
+        for m in percents
+        if any(
+            kw in low[max(0, m.start() - _ABV_ANCHOR_WINDOW): m.end() + _ABV_ANCHOR_WINDOW]
+            for kw in _ABV_KEYWORDS
+        )
+    ]
+    if anchored:
+        abv = _to_float(anchored[0].group(1))
+    elif len(percents) == 1:
+        abv = _to_float(percents[0].group(1))
+    else:
+        abv = None
+
+    proof_match = _PROOF_RE.search(text)
+    proof = _to_float(proof_match.group(1)) if proof_match else None
     return abv, proof
 
 
