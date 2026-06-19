@@ -69,6 +69,11 @@ A few behaviors are worth calling out:
   result shows its processing time, and anything over five seconds is flagged so
   the lag is visible. A hard request timeout (`REQUEST_TIMEOUT` in `label_ai.py`)
   turns a hung call into a clean, user-facing error instead of an indefinite wait.
+- **Downloadable results.** Once a batch is verified, a **Download all results
+  (CSV)** button exports every field of every label into one file — `filename,
+  field, expected, extracted, status, explanation` — for record-keeping or review
+  away from the app. Skipped or unreadable files are left out. Results are held in
+  session state, so downloading doesn't re-run the labels through the model.
 
 ## Architecture
 
