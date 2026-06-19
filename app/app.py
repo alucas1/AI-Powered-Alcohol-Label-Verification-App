@@ -367,24 +367,23 @@ if batch:
             # Per-field manual overrides. These widgets write to session_state and
             # take effect on the next rerun, where they're read above the grid.
             #
-            # A session_state-backed toggle gates the panel rather than an
-            # st.expander: an expander keeps its open/closed state only on the
-            # frontend and falls back to collapsed whenever a widget inside it
-            # triggers a rerun, so ticking an override checkbox would snap it shut.
-            # The toggle's state persists by key, so the panel stays open while the
-            # reviewer works through it.
-            if st.toggle("Overrides", key=f"ovr_show_{i}"):
-                with st.container(border=True):
-                    st.caption(
-                        "Manually set a field's result when you disagree with the "
-                        'automated check. Overrides are marked "(manual)" in the grid '
-                        "and the CSV; the banner keeps the automated verdict."
-                    )
-                    # The Result/Reason controls render for every field (disabled
-                    # until the field is ticked) rather than appearing on tick, so
-                    # the panel's structure stays constant across reruns.
-                    for j, r in enumerate(results):
-                        on = st.checkbox(f"Override {r.field}", key=f"ovr_on_{i}_{j}")
+            # The panel is always rendered: gating it behind a toggle tore the
+            # widgets out of the tree whenever it closed, and Streamlit drops the
+            # session_state for widgets that don't render on a given run, so a
+            # field's status and reason were lost as soon as the panel collapsed.
+            # The per-field checkbox stays mounted across reruns, so its Result and
+            # Reason controls can appear only once it's ticked without losing the
+            # checkbox state itself.
+            with st.container(border=True):
+                st.markdown("**Overrides**")
+                st.caption(
+                    "Manually set a field's result when you disagree with the "
+                    'automated check. Overrides are marked "(manual)" in the grid '
+                    "and the CSV; the banner keeps the automated verdict."
+                )
+                for j, r in enumerate(results):
+                    on = st.checkbox(f"Override {r.field}", key=f"ovr_on_{i}_{j}")
+                    if on:
                         oc1, oc2 = st.columns([1, 2])
                         with oc1:
                             st.radio(
@@ -393,7 +392,6 @@ if batch:
                                 horizontal=True,
                                 key=f"ovr_status_{i}_{j}",
                                 label_visibility="collapsed",
-                                disabled=not on,
                             )
                         with oc2:
                             st.text_input(
@@ -401,7 +399,6 @@ if batch:
                                 placeholder="Reason for override (optional)",
                                 key=f"ovr_reason_{i}_{j}",
                                 label_visibility="collapsed",
-                                disabled=not on,
                             )
 
     # One combined CSV of every verified label, carrying each label's manual
