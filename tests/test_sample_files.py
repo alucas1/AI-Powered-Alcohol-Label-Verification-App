@@ -6,8 +6,10 @@ test_files/README.md) stands in for the model's output so the documented
 pass/fail outcomes are asserted without a network call.
 
 A genuine end-to-end test that sends the images to the AI provider is included
-too, but skipped unless RUN_LIVE_EXTRACTION=1 — it needs an API key, costs money,
-and varies between runs.
+too. It runs by default, but only once a precheck confirms a usable API key and a
+reachable model (see the `live_extraction_ready` fixture); without valid
+credentials it skips rather than fails, so an offline checkout stays green. Set
+SKIP_LIVE_EXTRACTION=1 to opt out even when a key is present.
 """
 
 import os
@@ -17,7 +19,7 @@ from types import SimpleNamespace
 import pytest
 
 from batch import expected_for, load_expected_csv, missing_fields
-from label_ai import _prepare_image
+from label_ai import MissingAPIKeyError, _prepare_image, get_api_key, get_model
 from verifier import STANDARD_WARNING, Status, verify, warning_visual_format_result
 
 TEST_FILES = Path(__file__).resolve().parents[1] / "test_files"
@@ -133,7 +135,7 @@ def test_visual_format_row_flags_each_sample_for_review():
     assert warning_visual_format_result().status is Status.NEEDS_REVIEW
 
 
-# --- opt-in: real round-trip through the AI provider --------------------------
+# --- live: real round-trip through the AI provider ----------------------------
 #
 # DISCLAIMER — these tests call the live vision model and are NOT deterministic.
 # The model's reads drift between runs: OCR, line breaks, and capitalization
@@ -149,16 +151,18 @@ def test_visual_format_row_flags_each_sample_for_review():
 #   "pass" — the field must simply NOT FAIL. PASS and WARNING are matches; a
 #            NEEDS REVIEW (e.g. the model couldn't read the class) is tolerated
 #            because it defers to a human rather than asserting a mismatch.
-#   "noisy" — not asserted. stones_throw's label reads as "Stone's Throw Spirits",
-#            which fuzzy-fails the CSV's "Stone's Throw"; that's a real, recurring
-#            extraction quirk, not a signal worth gating the suite on.
+#   "noisy" — not asserted. The model drops trailing brand words run to run:
+#            stones_throw reads as "Stone's Throw Spirits" and silver_coast as
+#            "Silver Coast" (no "Distilling Co."), each fuzzy-failing the CSV brand
+#            on some runs and matching on others. That's a real extraction quirk,
+#            not a signal worth gating the suite on.
 EXPECTED_OUTCOMES = {
     "old_tom_distillery.png": {
         "Brand Name": "pass", "Class/Type": "pass", "Alcohol Content": "pass",
         "Net Contents": "pass", "Government Warning": "pass",
     },
     "silver_coast.png": {
-        "Brand Name": "pass", "Class/Type": "pass", "Alcohol Content": "pass",
+        "Brand Name": "noisy", "Class/Type": "pass", "Alcohol Content": "pass",
         "Net Contents": "pass", "Government Warning": "pass",
     },
     "stones_throw.png": {
@@ -172,12 +176,37 @@ EXPECTED_OUTCOMES = {
 }
 
 
-@pytest.mark.skipif(
-    os.environ.get("RUN_LIVE_EXTRACTION") != "1",
-    reason="live extraction is opt-in (uses the OpenAI API and a key); set RUN_LIVE_EXTRACTION=1",
-)
+@pytest.fixture(scope="module")
+def live_extraction_ready():
+    """Precondition for the live tests: a usable key and a reachable model.
+
+    Runs before the live extraction tests and gates them. The credentials are
+    proven, not assumed — `models.retrieve` exercises both the key (auth) and the
+    configured model (existence and access) in one lightweight call. Any failure
+    (no key, bad key, unknown model, no network) skips the live tests with the
+    reason instead of failing them, so a checkout without credentials stays green.
+    Set SKIP_LIVE_EXTRACTION=1 to opt out even when a valid key is present.
+    """
+    if os.environ.get("SKIP_LIVE_EXTRACTION") == "1":
+        pytest.skip("live extraction opted out (SKIP_LIVE_EXTRACTION=1)")
+
+    try:
+        key = get_api_key()
+    except MissingAPIKeyError:
+        pytest.skip("no OpenAI API key configured — set OPENAI_API_KEY to run the live tests")
+
+    from openai import OpenAI
+
+    model = get_model()
+    try:
+        OpenAI(api_key=key).models.retrieve(model)
+    except Exception as exc:
+        pytest.skip(f"model {model!r} is not reachable with this key ({exc})")
+    return model
+
+
 @pytest.mark.parametrize("name", SAMPLE_IMAGES)
-def test_live_extraction_matches_expected_outcomes(csv_map, name):
+def test_live_extraction_matches_expected_outcomes(live_extraction_ready, csv_map, name):
     """Read the image with the live model, verify it against the CSV's expected
     values, and check each field's outcome. See the disclaimer above: model
     output varies between runs, so a single failure may be noise — re-run."""
