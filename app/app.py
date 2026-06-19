@@ -9,6 +9,7 @@ time. Images stay in memory; nothing is persisted.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -29,6 +30,17 @@ st.set_page_config(page_title="Alcohol Label Verification", layout="wide")
 # Stakeholder target: a reviewer should get a result back in about this long.
 # Slower labels still render; they're flagged so the lag is visible, not hidden.
 LATENCY_TARGET_SECONDS = 5.0
+
+# Bundled sample set (committed under test_files/) for the "Run demo files"
+# shortcut: four labels and the matching per-file CSV. Resolved from the repo
+# root so it works whether run locally or on Streamlit Cloud.
+_SAMPLES_DIR = Path(__file__).resolve().parents[1] / "test_files"
+_SAMPLE_CSV = _SAMPLES_DIR / "sample_label_batch_test.csv"
+_SAMPLE_IMAGES = [
+    _SAMPLES_DIR / name
+    for name in ("old_tom_distillery.png", "silver_coast.png", "stones_throw.png", "monarch_hill.png")
+]
+_SAMPLES_AVAILABLE = _SAMPLE_CSV.exists() and all(p.exists() for p in _SAMPLE_IMAGES)
 
 # Result-table cell colour per status label (labels come from verifier.STATUS_LABEL).
 _STATUS_COLOR = {
@@ -91,6 +103,46 @@ st.write(
     "**Verify Labels**. The app reads each label and checks it against what you entered."
 )
 
+with st.expander("How to use this app"):
+    st.markdown(
+        """
+**What it does** — Reads each uploaded label with a vision model and checks it,
+field by field, against the expected values from the application.
+
+**Steps**
+1. Enter the expected values, or upload a per-file CSV for a batch of different labels.
+2. Upload one or more label images (PNG or JPG).
+3. Click **Verify Labels**.
+
+To see it in action, click **Run demo files** to verify four bundled sample
+labels automatically.
+
+**What the statuses mean**
+
+| Status | Meaning |
+|---|---|
+| PASS | Matches the application. |
+| WARNING | Minor difference, such as capitalization — confirm by eye. |
+| FAIL | Clear mismatch, or a formatting rule was broken. |
+| NEEDS REVIEW | Could not be read (glare or angle) — review by hand. |
+
+**Government warning** — The app verifies the wording and capitalization
+automatically, but bold text, type size, placement, and separation from other
+copy cannot be judged from an image. Each result includes a manual check box to
+confirm those by eye.
+
+**Results** — Each label shows its processing time (target: about five seconds).
+After a batch, you can download every result as a single CSV.
+        """
+    )
+
+run_demo = False
+if _SAMPLES_AVAILABLE:
+    run_demo = st.button(
+        "Run demo files",
+        help="Verify the four bundled sample labels using their matching CSV.",
+    )
+
 # --- Input form --------------------------------------------------------------
 
 with st.form("verification_form"):
@@ -133,49 +185,57 @@ with st.form("verification_form"):
 # Results are kept in session_state so they survive the rerun that a download
 # click triggers — the AI provider is never re-called just to redraw the page.
 
-if submitted:
+if submitted or run_demo:
     st.session_state.pop("batch", None)  # drop any previous run's results
     # Reset per-label visual-format confirmations so they don't carry over.
     for k in [k for k in st.session_state if k.startswith("vf_confirm_")]:
         del st.session_state[k]
 
-    if not uploaded_files:
-        st.warning("Please upload at least one label image to verify.")
-        st.stop()
+    # "Run demo files" verifies the bundled sample set via its CSV, no form input
+    # needed. A normal submit uses whatever was entered and uploaded.
+    use_samples = run_demo
 
-    shared_expected = {
-        "brand_name": brand_name,
-        "class_type": class_type,
-        "alcohol_content": alcohol_content,
-        "net_contents": net_contents,
-        "government_warning": government_warning,
-    }
-
-    # CSV mode supplies expected values per file; otherwise the form values
-    # above apply to every image. Validation differs: in CSV mode each row is
-    # checked as its file is processed, so a blank form is fine.
+    # Resolve the images to verify and the expected-value source (a per-file CSV
+    # map, or the shared form values). CSV mode validates each row as it's
+    # processed, so the form may be blank.
+    shared_expected = None
     csv_map = None
-    if csv_file is not None:
-        try:
-            csv_map = load_expected_csv(csv_file.getvalue())
-        except ValueError as exc:
-            st.error(f"Could not read the expected-values CSV: {exc}")
-            st.stop()
+    if use_samples:
+        files = [(p.name, p.read_bytes()) for p in _SAMPLE_IMAGES]
+        csv_map = load_expected_csv(_SAMPLE_CSV.read_bytes())
     else:
-        missing = missing_fields(shared_expected)
-        if missing:
-            st.warning(
-                "Please fill in all required expected values before verifying. "
-                "Missing: " + ", ".join(missing) + "."
-            )
+        if not uploaded_files:
+            st.warning("Please upload at least one label image to verify.")
             st.stop()
+        files = [(u.name, u.getvalue()) for u in uploaded_files]
+        if csv_file is not None:
+            try:
+                csv_map = load_expected_csv(csv_file.getvalue())
+            except ValueError as exc:
+                st.error(f"Could not read the expected-values CSV: {exc}")
+                st.stop()
+        else:
+            shared_expected = {
+                "brand_name": brand_name,
+                "class_type": class_type,
+                "alcohol_content": alcohol_content,
+                "net_contents": net_contents,
+                "government_warning": government_warning,
+            }
+            missing = missing_fields(shared_expected)
+            if missing:
+                st.warning(
+                    "Please fill in all required expected values before verifying. "
+                    "Missing: " + ", ".join(missing) + "."
+                )
+                st.stop()
 
     batch = []
-    for uploaded in uploaded_files:
-        entry = {"name": uploaded.name, "image": uploaded.getvalue()}
+    for name, data in files:
+        entry = {"name": name, "image": data}
 
         if csv_map is not None:
-            expected = expected_for(uploaded.name, csv_map)
+            expected = expected_for(name, csv_map)
             if expected is None:
                 entry["skip"] = (
                     "No row for this file in the CSV — skipped. Add a row with this "
@@ -193,8 +253,8 @@ if submitted:
 
         try:
             start = time.perf_counter()
-            with st.spinner(f"Reading {uploaded.name}…"):
-                extracted = extract_label_fields(uploaded.getvalue())
+            with st.spinner(f"Reading {name}…"):
+                extracted = extract_label_fields(data)
             entry["elapsed"] = time.perf_counter() - start
         except MissingAPIKeyError:
             st.error(
