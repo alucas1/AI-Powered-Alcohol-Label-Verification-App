@@ -52,9 +52,9 @@ the model:
 
 A few behaviors are worth calling out:
 
-- **Try it instantly.** A **Run demo files** button verifies four bundled sample
-  labels against their matching CSV in one click — a full run without preparing
-  your own inputs.
+- **Bundled demo.** A **Run demo files** button verifies four sample labels
+  against their matching CSV in one click, so the app can be exercised end to end
+  without preparing your own inputs.
 - **In-app help.** A collapsible **How to use this app** panel at the top covers
   the steps, what each status means, and the expected behavior.
 - **Required fields.** All five expected values — brand name, class/type, alcohol
@@ -78,9 +78,9 @@ A few behaviors are worth calling out:
 - **Full warning on demand.** The government warning is long, so the grid shows a
   truncated cell; a **Show full government warning** expander under each result
   reveals the complete expected-vs-extracted text for side-by-side comparison.
-- **Manual overrides.** Disagree with an automated check? An **Overrides** panel
-  under each result lets you set any field to PASS or FAIL with an optional
-  reason. Overridden fields read `PASS (manual)` / `FAIL (manual)` in the grid and
+- **Manual overrides.** When a reviewer disagrees with an automated check, an
+  **Overrides** panel under each result lets them set any field to PASS or FAIL
+  with an optional reason. Overridden fields read `PASS (manual)` / `FAIL (manual)` in the grid and
   the results CSV (the reason defaults to "Manually passed/failed" if left blank).
   The top-line banner still reflects the automated verdict, so a manual decision
   never hides what the model found.
@@ -229,6 +229,51 @@ up your own:
    OPENAI_API_KEY = "sk-..."
    ```
 4. Deploy. Streamlit installs `requirements.txt` automatically.
+
+## Cost analysis
+
+Each label is a single API call. The recurring cost of running the tool is the
+per-call token charge, so the math is simple and scales linearly with volume.
+
+**Per-call token estimate.** One label sends the fixed system prompt, a short
+instruction, and the downscaled image (capped at a 1600 px edge), and receives a
+small JSON object of the five fields. That works out to roughly **1,500 input
+tokens and 250 output tokens** per label. Image-heavy labels run higher; this is a
+working average, not a guarantee.
+
+**Pricing (OpenAI list prices, June 2026).** Vision input is billed at the
+model's standard token rate; there is no separate per-image charge.
+
+| Model | Input / 1M | Output / 1M | Per label | Per 1,000 labels |
+|---|---|---|---|---|
+| `gpt-5.4-nano` (default) | $0.20 | $1.25 | ~$0.0006 | ~$0.61 |
+| `gpt-5.4-mini` | $0.75 | $4.50 | ~$0.0023 | ~$2.25 |
+| `gpt-5.4` | $2.50 | $15.00 | ~$0.0075 | ~$7.50 |
+
+**At TTB's scale.** The Compliance Division reviews roughly 150,000 applications a
+year. Running every one through the default model costs on the order of **$90–100
+a year** in API spend; the mid tier is about **$340**, and the largest model about
+**$1,100**. Even with retries and multiple images per application, this stays in
+the low hundreds to low thousands of dollars annually — set against the $4.2M
+quoted for a COLA rebuild, the model cost is not the deciding factor.
+
+**Why the default is the cheapest tier.** The model only transcribes text; every
+pass/fail decision is made in deterministic code (see [How each field is
+checked](#how-each-field-is-checked)). Transcription is well within the smallest
+model's ability, so paying for a larger one buys little here. If extraction
+accuracy on poor-quality images proves limiting, `OPENAI_MODEL` switches tiers
+without a code change, and the table above bounds the cost of doing so.
+
+**Further reductions.** Two OpenAI features apply directly to this workload but
+are not enabled in the prototype:
+
+- **Batch API** — the importer use case (200–300 labels dropped at once) is a
+  natural fit for asynchronous batch submission, which lists at a 50% discount.
+- **Prompt caching** — the system prompt is identical on every call, so caching
+  its prefix trims the input cost on repeated runs.
+
+Prices move; verify against [OpenAI's pricing page](https://openai.com/api/pricing/)
+before budgeting.
 
 ## Design notes and assumptions
 
