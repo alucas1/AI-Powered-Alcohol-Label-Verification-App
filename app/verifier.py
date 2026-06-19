@@ -212,6 +212,28 @@ def _compare_warning(field: str, expected, extracted) -> FieldResult:
                        f"Government warning does not match the required statement word-for-word ({score:.0f}% similar).")
 
 
+def warning_visual_format_result() -> FieldResult:
+    """Advisory row for the government warning's visual formatting.
+
+    `_compare_warning` checks the wording and the all-caps header from a text
+    transcription, but a transcription carries no type size, weight, placement,
+    or whitespace. Those rules can't be judged here, so this row is always
+    NEEDS_REVIEW: an honest hand-off to a human rather than a false PASS.
+    """
+    return FieldResult(
+        field="Warning Visual Format",
+        expected="",
+        extracted="",
+        status=Status.NEEDS_REVIEW,
+        explanation=(
+            "Wording and capitalization are verified automatically. A reviewer "
+            "must still confirm the visual formatting by eye: bold "
+            "'GOVERNMENT WARNING:', legible type size, placement, and clear "
+            "separation from other label information."
+        ),
+    )
+
+
 def verify(expected: dict, extracted) -> list[FieldResult]:
     """Compare a dict of expected values against extracted `LabelFields`.
 
