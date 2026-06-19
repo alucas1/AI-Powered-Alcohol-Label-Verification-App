@@ -49,6 +49,11 @@ the model:
 
 A few behaviors are worth calling out:
 
+- **Try it instantly.** A **Run demo files** button verifies four bundled sample
+  labels against their matching CSV in one click — a full run without preparing
+  your own inputs.
+- **In-app help.** A collapsible **How to use this app** panel at the top covers
+  the steps, what each status means, and the expected behavior.
 - **Required fields.** All five expected values — brand name, class/type, alcohol
   content, net contents, and the government warning — must be filled in before a
   label is verified. Submitting with any blank lists the missing fields and stops
