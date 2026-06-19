@@ -238,45 +238,52 @@ if submitted or run_demo:
                 st.stop()
 
     batch = []
-    for name, data in files:
-        entry = {"name": name, "image": data}
+    total = len(files)
+    # st.status gives an animated spinner (keeps moving while the call blocks)
+    # plus an updatable label, so the reviewer sees which label is in flight.
+    with st.status(f"Processing {total} label{'s' if total != 1 else ''}…", expanded=False) as status:
+        for idx, (name, data) in enumerate(files):
+            status.update(label=f"Processed {idx}/{total} — Processing {name}…")
+            entry = {"name": name, "image": data}
 
-        if csv_map is not None:
-            expected = expected_for(name, csv_map)
-            if expected is None:
-                entry["skip"] = (
-                    "No row for this file in the CSV — skipped. Add a row with this "
-                    "exact filename, or remove the CSV to use the shared values."
-                )
-                batch.append(entry)
-                continue
-            row_missing = missing_fields(expected)
-            if row_missing:
-                entry["skip"] = "CSV row is missing " + ", ".join(row_missing) + " — skipped."
-                batch.append(entry)
-                continue
-        else:
-            expected = shared_expected
+            if csv_map is not None:
+                expected = expected_for(name, csv_map)
+                if expected is None:
+                    entry["skip"] = (
+                        "No row for this file in the CSV — skipped. Add a row with this "
+                        "exact filename, or remove the CSV to use the shared values."
+                    )
+                    batch.append(entry)
+                    continue
+                row_missing = missing_fields(expected)
+                if row_missing:
+                    entry["skip"] = "CSV row is missing " + ", ".join(row_missing) + " — skipped."
+                    batch.append(entry)
+                    continue
+            else:
+                expected = shared_expected
 
-        try:
-            start = time.perf_counter()
-            with st.spinner(f"Reading {name}…"):
+            try:
+                start = time.perf_counter()
                 extracted = extract_label_fields(data)
-            entry["elapsed"] = time.perf_counter() - start
-        except MissingAPIKeyError:
-            st.error(
-                "**No OpenAI API key configured.** Add `OPENAI_API_KEY` to "
-                "`.streamlit/secrets.toml` (local) or the app's **Secrets** "
-                "settings (Streamlit Cloud), then try again."
-            )
-            st.stop()
-        except ExtractionError as exc:
-            entry["error"] = str(exc)
-            batch.append(entry)
-            continue
+                entry["elapsed"] = time.perf_counter() - start
+            except MissingAPIKeyError:
+                status.update(label="Stopped — no API key configured", state="error")
+                st.error(
+                    "**No OpenAI API key configured.** Add `OPENAI_API_KEY` to "
+                    "`.streamlit/secrets.toml` (local) or the app's **Secrets** "
+                    "settings (Streamlit Cloud), then try again."
+                )
+                st.stop()
+            except ExtractionError as exc:
+                entry["error"] = str(exc)
+                batch.append(entry)
+                continue
 
-        entry["results"] = verify(expected, extracted)
-        batch.append(entry)
+            entry["results"] = verify(expected, extracted)
+            batch.append(entry)
+
+        status.update(label=f"Verified {total} label{'s' if total != 1 else ''}", state="complete")
 
     st.session_state["batch"] = batch
 
