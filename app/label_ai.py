@@ -29,6 +29,11 @@ DEFAULT_MODEL = "gpt-5.4-nano"
 # upload: smaller payload and cost, with no measurable hit to OCR on label text.
 MAX_IMAGE_EDGE = 1600
 
+# Hard cap on a single image round-trip. The ~5s/label target is a soft goal
+# surfaced in the UI; this is the safety net that turns a hung request into a
+# clean ExtractionError instead of an indefinite wait.
+REQUEST_TIMEOUT = 30.0
+
 
 class LabelFields(BaseModel):
     """The fields we ask the model to read off a label. `None` = not readable."""
@@ -133,6 +138,7 @@ def extract_label_fields(image_bytes: bytes) -> LabelFields:
         response = client.chat.completions.create(
             model=get_model(),
             temperature=0,
+            timeout=REQUEST_TIMEOUT,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
