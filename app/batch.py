@@ -86,27 +86,47 @@ def expected_for(filename, csv_map: dict[str, dict]) -> dict | None:
     return csv_map.get(_normalize_name(filename))
 
 
-# Columns of the downloadable results CSV: one row per field per image.
+# Columns of the downloadable results CSV: one row per field per image, plus a
+# trailing manual-review row carrying the reviewer's visual-format confirmation.
 RESULTS_CSV_COLUMNS = ["filename", "field", "expected", "extracted", "status", "explanation"]
 
 
-def results_to_csv(verified: Iterable[tuple[str, list[FieldResult]]]) -> str:
-    """Flatten a verified batch into one CSV, one row per field per image.
+def _manual_review_row(filename: str, confirmed: bool) -> dict:
+    """The visual-format confirmation row, with status driven by the reviewer's
+    checkbox (YES once they've confirmed it by eye, NO until then)."""
+    return {
+        "filename": filename,
+        "field": "Manual Visual Format Review",
+        "expected": "Bold 'GOVERNMENT WARNING:', legible type size, placement, separation",
+        "extracted": "",
+        "status": "YES" if confirmed else "NO",
+        "explanation": (
+            "Reviewer confirmed the warning's visual formatting by eye."
+            if confirmed
+            else "Not confirmed — visual formatting still needs manual review."
+        ),
+    }
 
-    `verified` is an iterable of (filename, results) pairs, where `results` is
-    the list of FieldResult rows already shown for that image. Statuses use the
-    same human-readable labels as the on-screen table. Returns CSV text.
+
+def results_to_csv(verified: Iterable[tuple[str, list[FieldResult], bool]]) -> str:
+    """Flatten a verified batch into one CSV: one row per field per image, then a
+    manual-review row per image.
+
+    `verified` is an iterable of (filename, results, visual_confirmed) tuples,
+    where `results` is the comparison rows shown for that image and
+    `visual_confirmed` is the reviewer's checkbox state. Comparison statuses use
+    the same human-readable labels as the on-screen table. Returns CSV text.
     """
-    records = [
-        {
-            "filename": filename,
-            "field": r.field,
-            "expected": r.expected,
-            "extracted": r.extracted,
-            "status": STATUS_LABEL[r.status],
-            "explanation": r.explanation,
-        }
-        for filename, results in verified
-        for r in results
-    ]
+    records = []
+    for filename, results, confirmed in verified:
+        for r in results:
+            records.append({
+                "filename": filename,
+                "field": r.field,
+                "expected": r.expected,
+                "extracted": r.extracted,
+                "status": STATUS_LABEL[r.status],
+                "explanation": r.explanation,
+            })
+        records.append(_manual_review_row(filename, confirmed))
     return pd.DataFrame(records, columns=RESULTS_CSV_COLUMNS).to_csv(index=False)
