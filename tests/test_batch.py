@@ -72,18 +72,32 @@ def _rows(*results):
     return [FieldResult(field, "exp", "ext", status, "why") for field, status in results]
 
 
-def test_results_csv_has_one_row_per_field_per_image():
+def test_results_csv_has_field_rows_plus_a_manual_review_row_per_image():
     verified = [
-        ("a.png", _rows(("Brand Name", Status.PASS), ("Alcohol Content", Status.FAIL))),
-        ("b.png", _rows(("Brand Name", Status.WARNING))),
+        ("a.png", _rows(("Brand Name", Status.PASS), ("Alcohol Content", Status.FAIL)), True),
+        ("b.png", _rows(("Brand Name", Status.WARNING)), False),
     ]
     rows = list(csvlib.DictReader(io.StringIO(results_to_csv(verified))))
-    assert [r["filename"] for r in rows] == ["a.png", "a.png", "b.png"]
-    assert [r["field"] for r in rows] == ["Brand Name", "Alcohol Content", "Brand Name"]
+    assert [(r["filename"], r["field"]) for r in rows] == [
+        ("a.png", "Brand Name"),
+        ("a.png", "Alcohol Content"),
+        ("a.png", "Manual Visual Format Review"),
+        ("b.png", "Brand Name"),
+        ("b.png", "Manual Visual Format Review"),
+    ]
+
+
+def test_manual_review_status_reflects_the_checkbox():
+    confirmed = [("a.png", _rows(("Brand Name", Status.PASS)), True)]
+    not_confirmed = [("b.png", _rows(("Brand Name", Status.PASS)), False)]
+    yes = list(csvlib.DictReader(io.StringIO(results_to_csv(confirmed))))[-1]
+    no = list(csvlib.DictReader(io.StringIO(results_to_csv(not_confirmed))))[-1]
+    assert yes["status"] == "YES"
+    assert no["status"] == "NO"
 
 
 def test_results_csv_uses_human_readable_status_labels():
-    verified = [("a.png", _rows(("Government Warning", Status.NEEDS_REVIEW)))]
+    verified = [("a.png", _rows(("Government Warning", Status.NEEDS_REVIEW)), False)]
     rows = list(csvlib.DictReader(io.StringIO(results_to_csv(verified))))
     assert rows[0]["status"] == "NEEDS REVIEW"  # not the enum's "NEEDS_REVIEW"
 
