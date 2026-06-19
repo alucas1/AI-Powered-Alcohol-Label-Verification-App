@@ -70,8 +70,10 @@ def _render_table(results: list[FieldResult]) -> None:
     def _color(val):
         return _STATUS_COLOR.get(val, "")
 
-    styler = df.style.map(_color, subset=["Status"])
-    st.dataframe(styler, hide_index=True, width="stretch")
+    # st.table (not st.dataframe) so long explanations wrap onto multiple lines
+    # and stay fully visible, instead of being truncated in a scrollable grid.
+    styler = df.style.map(_color, subset=["Status"]).hide(axis="index")
+    st.table(styler)
 
 
 # --- Header ------------------------------------------------------------------
