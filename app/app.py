@@ -18,10 +18,10 @@ from label_ai import ExtractionError, MissingAPIKeyError, extract_label_fields
 from verifier import (
     STANDARD_WARNING,
     STATUS_LABEL,
+    VISUAL_FORMAT_NOTE,
     FieldResult,
     Status,
     verify,
-    warning_visual_format_result,
 )
 
 st.set_page_config(page_title="Alcohol Label Verification", layout="wide")
@@ -48,9 +48,16 @@ def _overall(results: list[FieldResult]):
         return "Some fields need manual review.", "warning"
     if Status.WARNING in statuses:
         return "Passed with minor differences to confirm.", "warning"
-    # Never claim a blanket pass: the warning's visual formatting is always a
-    # manual check (see the Warning Visual Format row), so say so here too.
-    return "Automated checks passed — confirm the warning's visual format by eye.", "success"
+    # Banner reports only the automated comparison. The warning's visual format
+    # is a separate manual step, surfaced as its own confirmation below.
+    return "Automated checks passed.", "success"
+
+
+def _truncate(text: str, limit: int = 75) -> str:
+    """Shorten long cell text for the grid; the full value lives elsewhere (the
+    government warning has its own expander)."""
+    text = str(text)
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
 
 def _render_table(results: list[FieldResult]) -> None:
@@ -58,8 +65,8 @@ def _render_table(results: list[FieldResult]) -> None:
         [
             {
                 "Field": r.field,
-                "Expected": r.expected or "—",
-                "Extracted from Label": r.extracted or "—",
+                "Expected": _truncate(r.expected) or "—",
+                "Extracted from Label": _truncate(r.extracted) or "—",
                 "Status": STATUS_LABEL[r.status],
                 "Explanation": r.explanation,
             }
@@ -128,6 +135,9 @@ with st.form("verification_form"):
 
 if submitted:
     st.session_state.pop("batch", None)  # drop any previous run's results
+    # Reset per-label visual-format confirmations so they don't carry over.
+    for k in [k for k in st.session_state if k.startswith("vf_confirm_")]:
+        del st.session_state[k]
 
     if not uploaded_files:
         st.warning("Please upload at least one label image to verify.")
@@ -210,7 +220,8 @@ if batch:
     count = len(batch)
     st.subheader(f"Results ({count} label{'s' if count != 1 else ''})")
 
-    for entry in batch:
+    confirmations = {}  # entry index -> visual-format checkbox state
+    for i, entry in enumerate(batch):
         st.divider()
         st.markdown(f"#### {entry['name']}")
         image_col, result_col = st.columns([1, 2])
@@ -232,8 +243,6 @@ if batch:
                 st.error(f"Could not verify **{entry['name']}**: {entry['error']}")
                 continue
 
-            # Overall banner reflects the automated field comparisons; the
-            # visual-format row is appended as a standing manual-review item.
             results = entry["results"]
             headline, banner = _overall(results)
             getattr(st, banner)(headline)
@@ -246,12 +255,34 @@ if batch:
                     f"{LATENCY_TARGET_SECONDS:.0f}s target response time."
                 )
 
-            _render_table(results + [warning_visual_format_result()])
+            _render_table(results)
 
-    # One combined CSV of every verified label; skipped/errored files are left out.
+            # The government warning is long; the grid shows a truncated cell, so
+            # offer the full expected-vs-extracted text on demand.
+            warning = next((r for r in results if r.field == "Government Warning"), None)
+            if warning is not None:
+                with st.expander("Show full government warning"):
+                    st.markdown("**Expected**")
+                    st.write(warning.expected or "—")
+                    st.markdown("**Extracted from label**")
+                    st.write(warning.extracted or "—")
+
+            # Visual format can't be verified from a transcription. Surface it as
+            # an explicit manual step the reviewer ticks off (not persisted).
+            with st.container(border=True):
+                st.markdown("**Visual format — manual check**")
+                st.caption(VISUAL_FORMAT_NOTE)
+                confirmations[i] = st.checkbox(
+                    "I've confirmed the warning's visual formatting by eye.",
+                    key=f"vf_confirm_{i}",
+                )
+
+    # One combined CSV of every verified label, carrying each label's manual
+    # visual-format confirmation. Built every rerun, so ticking a box updates the
+    # download's contents. Skipped/errored files are left out.
     verified = [
-        (entry["name"], entry["results"] + [warning_visual_format_result()])
-        for entry in batch
+        (entry["name"], entry["results"], confirmations.get(i, False))
+        for i, entry in enumerate(batch)
         if "results" in entry
     ]
     if verified:
