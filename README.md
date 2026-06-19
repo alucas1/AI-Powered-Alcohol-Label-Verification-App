@@ -28,6 +28,9 @@ result back in roughly five seconds per label.
   | NEEDS REVIEW | Could not be read or parsed (glare, bad angle). Review by hand. |
 
 - Shows the processing time per label.
+- Flags the government warning's visual formatting (bold, type size, placement)
+  for a manual check, since it can't be confirmed from an image.
+- Exports every result in a batch as a single downloadable CSV.
 
 ### How each field is checked
 
@@ -89,16 +92,16 @@ A few behaviors are worth calling out:
 
 ## Architecture
 
-Three concerns, kept separate so the AI provider can change without touching the
-UI or the comparison rules:
+Concerns are kept separate so the AI provider can change without touching the UI
+or the comparison rules:
 
 ```
 .
-├── .streamlit/                 # config + secrets, resolved from the run directory
+├── .streamlit/                 # config.toml + secrets, resolved from the run directory
 ├── app/
 │   ├── app.py                  # Streamlit UI and orchestration
 │   ├── label_ai.py             # the only module that calls the AI provider
-│   ├── batch.py                # required-field validation and CSV-per-file loading
+│   ├── batch.py                # CSV validation/loading and results export
 │   └── verifier.py             # comparison logic; no UI, no network
 ├── tests/                      # pytest suite, one file per concern
 │   ├── test_text_fields.py
@@ -109,7 +112,9 @@ UI or the comparison rules:
 │   ├── test_validation.py
 │   ├── test_batch.py
 │   ├── test_verify.py
+│   ├── test_sample_files.py    # end-to-end checks over the bundled sample set
 │   └── make_sample_labels.py   # generates a synthetic label for local testing
+├── test_files/                 # bundled sample labels + CSV (used by the demo and tests)
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── pytest.ini
@@ -126,7 +131,24 @@ in memory and never written to disk.
 
 ## Setup
 
-Requires Python 3.10+.
+### Requirements
+
+- Python 3.10 or newer (developed and tested on 3.12).
+- An OpenAI API key with access to a vision-capable model.
+- Python packages, pinned in `requirements.txt`:
+
+  | Package | Version | Used for |
+  |---|---|---|
+  | streamlit | >= 1.49 | UI and app runtime |
+  | openai | >= 1.50 | vision model client |
+  | rapidfuzz | >= 3.9 | fuzzy text matching |
+  | pillow | >= 11.0 | image decode and downscale |
+  | pydantic | >= 2.7 | validating the model's JSON |
+  | pandas | >= 2.2 | result tables and CSV I/O |
+
+  Running the tests also needs `pytest >= 8.0` (`requirements-dev.txt`).
+
+### Install and run
 
 ```bash
 git clone <your-repo-url>
@@ -142,9 +164,10 @@ cp .streamlit/secrets.toml.example .streamlit/secrets.toml
 streamlit run app/app.py           # from the repo root
 ```
 
-The app opens at http://localhost:8501.
+The app opens at http://localhost:8501. Click **Run demo files** to verify the
+bundled sample labels, or enter your own values and upload images.
 
-Generate a sample label to try it against:
+To generate a fresh synthetic label to test against:
 
 ```bash
 python tests/make_sample_labels.py   # writes sample_labels/old_tom_distillery.png
@@ -152,12 +175,21 @@ python tests/make_sample_labels.py   # writes sample_labels/old_tom_distillery.p
 
 ### Tests
 
-`verifier.py` is covered by a pytest suite: one file per field comparison plus an
-end-to-end check of `verify()`.
+The pytest suite covers the deterministic logic: `verifier.py`'s field
+comparisons, `batch.py`'s validation, CSV loading, and results export, plus an
+end-to-end pass over the bundled sample set.
 
 ```bash
 pip install -r requirements-dev.txt
 pytest
+```
+
+`tests/test_sample_files.py` also carries a live, end-to-end check that sends the
+sample images to the model and validates the results. It's skipped by default —
+it makes real API calls and its output varies between runs — and is enabled with:
+
+```bash
+RUN_LIVE_EXTRACTION=1 pytest tests/test_sample_files.py
 ```
 
 ### Configuration
@@ -204,8 +236,9 @@ It's a prototype, and a few choices reflect that:
   warning to be bold, legible at a type size that scales with container size, a
   continuous paragraph, and set apart from other copy — none of which a
   transcription can prove. Rather than let the model guess at the most legally
-  sensitive field, the `Warning Visual Format` row is always NEEDS REVIEW, keeping
-  that judgment with the reviewer.
+  sensitive field, the app surfaces visual formatting as a manual confirmation the
+  reviewer ticks off (recorded as `YES`/`NO` in the results CSV), keeping that
+  judgment with a person.
 - Output quality tracks image quality. Bad angle, glare, or lighting yields
   NEEDS REVIEW rather than a confident-but-wrong PASS or FAIL.
 
