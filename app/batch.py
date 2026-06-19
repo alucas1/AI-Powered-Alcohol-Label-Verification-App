@@ -1,14 +1,11 @@
 """Batch CSV handling: required-field validation, per-file expected-value
-loading, and exporting verified results.
+loading, and exporting verified results as a single downloadable CSV.
 
-Pure helpers (pandas only, no Streamlit or network), so the UI can stay thin and
-the rules stay unit-testable. The UI offers two input modes:
+Pure helpers (pandas only, no Streamlit or network), so the UI stays thin and the
+rules stay unit-testable. Two input modes feed the verifier:
 
 - Shared: one set of expected values typed once, applied to every image.
 - CSV: a per-image override, matched to the upload by filename.
-
-and, after a batch is verified, hands the combined results back as a single
-downloadable CSV.
 """
 
 from __future__ import annotations
