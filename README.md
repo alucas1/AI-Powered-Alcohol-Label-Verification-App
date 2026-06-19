@@ -182,8 +182,13 @@ It's a prototype, and a few choices reflect that:
   tool would pull those from COLA rather than a hand-authored CSV.
 - The thresholds (fuzzy >= 90%, ABV +/-0.1, ~1% volume tolerance) are reasonable
   defaults, not TTB-calibrated tolerances.
-- The warning check covers header casing and the standard text. It does not check
-  font size, weight, or placement, none of which survive a text transcription.
+- The warning check covers header casing and exact wording, both of which survive
+  a text transcription, and deliberately stops there. TTB also requires the
+  warning to be bold, legible at a type size that scales with container size, a
+  continuous paragraph, and set apart from other copy — none of which a
+  transcription can prove. Rather than let the model guess at the most legally
+  sensitive field, the `Warning Visual Format` row is always NEEDS REVIEW, keeping
+  that judgment with the reviewer.
 - Output quality tracks image quality. Bad angle, glare, or lighting yields
   NEEDS REVIEW rather than a confident-but-wrong PASS or FAIL.
 
