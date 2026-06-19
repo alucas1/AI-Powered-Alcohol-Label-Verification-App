@@ -62,9 +62,14 @@ A few behaviors are worth calling out:
   skipped rather than verified against the wrong data.
 - **Warning visual formatting.** Wording and header capitalization are checked
   automatically, but type size, weight, placement, and separation from other copy
-  can't be judged from a text transcription. Every result therefore carries a
-  standing **Warning Visual Format** row marked NEEDS REVIEW, directing a human to
-  confirm bold `GOVERNMENT WARNING:`, legibility, type size, and placement by eye.
+  can't be judged from a text transcription. Each result therefore carries a
+  **Visual format — manual check** box with a checkbox the reviewer ticks once
+  they've confirmed bold `GOVERNMENT WARNING:`, legibility, type size, and
+  placement by eye. It's a reviewer acknowledgment, kept separate from the
+  automated grid; it doesn't change the pass/fail verdict and isn't persisted.
+- **Full warning on demand.** The government warning is long, so the grid shows a
+  truncated cell; a **Show full government warning** expander under each result
+  reveals the complete expected-vs-extracted text for side-by-side comparison.
 - **Response time.** Stakeholder feedback set a ~5 second per-label target. Each
   result shows its processing time, and anything over five seconds is flagged so
   the lag is visible. A hard request timeout (`REQUEST_TIMEOUT` in `label_ai.py`)
@@ -72,8 +77,10 @@ A few behaviors are worth calling out:
 - **Downloadable results.** Once a batch is verified, a **Download all results
   (CSV)** button exports every field of every label into one file — `filename,
   field, expected, extracted, status, explanation` — for record-keeping or review
-  away from the app. Skipped or unreadable files are left out. Results are held in
-  session state, so downloading doesn't re-run the labels through the model.
+  away from the app. Each label also gets a `Manual Visual Format Review` row whose
+  status reflects its checkbox (`YES`/`NO`), so ticking a box updates the download.
+  Skipped or unreadable files are left out. Results are held in session state, so
+  downloading doesn't re-run the labels through the model.
 
 ## Architecture
 
