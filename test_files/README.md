@@ -2,8 +2,8 @@
 
 Four label images and a batch CSV for exercising the verifier end to end: one
 clean pass, one with a brand-extraction wrinkle, one with a failing field, and
-one with a failing government warning. Upload the four images together with the
-CSV (batch mode) to reproduce the results below.
+one with a failing government warning. Click **Run demo files** in the app, or
+upload the four images with the CSV (batch mode), to reproduce the results below.
 
 ## Files
 
@@ -32,9 +32,10 @@ Every row uses the standard TTB health warning as the expected text:
 GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.
 ```
 
-The app adds a fixed `Warning Visual Format` row to every result. It always
-reports NEEDS REVIEW — type size, weight, and placement can't be judged from a
-text transcription — so it's omitted from the per-file tables below.
+Visual formatting of the warning — bold header, type size, placement — can't be
+judged from a text transcription, so the app surfaces it as a separate manual
+checkbox rather than an automated field. The per-file tables below cover only the
+automated comparisons.
 
 ## Expected results
 
