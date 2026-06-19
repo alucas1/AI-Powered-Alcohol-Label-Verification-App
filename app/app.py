@@ -13,10 +13,15 @@ import time
 import pandas as pd
 import streamlit as st
 
+from batch import expected_for, load_expected_csv, missing_fields
 from label_ai import ExtractionError, MissingAPIKeyError, extract_label_fields
-from verifier import STANDARD_WARNING, FieldResult, Status, verify
+from verifier import STANDARD_WARNING, FieldResult, Status, verify, warning_visual_format_result
 
 st.set_page_config(page_title="Alcohol Label Verification", layout="wide")
+
+# Stakeholder target: a reviewer should get a result back in about this long.
+# Slower labels still render; they're flagged so the lag is visible, not hidden.
+LATENCY_TARGET_SECONDS = 5.0
 
 # Per-status display label and result-table cell colour.
 _STATUS_LABEL = {
@@ -100,6 +105,15 @@ with st.form("verification_form"):
         accept_multiple_files=True,
     )
 
+    st.subheader("3. Per-file expected values (optional)")
+    st.caption(
+        "Verifying many different labels at once? Upload a CSV with columns "
+        "`filename, brand_name, class_type, alcohol_content, net_contents, "
+        "government_warning` — one row per image. Each image is matched to its "
+        "row by filename. Leave this empty to apply the values above to every image."
+    )
+    csv_file = st.file_uploader("Expected-values CSV", type=["csv"])
+
     submitted = st.form_submit_button("Verify Labels", type="primary", use_container_width=True)
 
 # --- Processing --------------------------------------------------------------
@@ -109,13 +123,32 @@ if submitted:
         st.warning("Please upload at least one label image to verify.")
         st.stop()
 
-    expected = {
+    shared_expected = {
         "brand_name": brand_name,
         "class_type": class_type,
         "alcohol_content": alcohol_content,
         "net_contents": net_contents,
         "government_warning": government_warning,
     }
+
+    # CSV mode supplies expected values per file; otherwise the form values
+    # above apply to every image. Validation differs: in CSV mode each row is
+    # checked as its file is processed, so a blank form is fine.
+    csv_map = None
+    if csv_file is not None:
+        try:
+            csv_map = load_expected_csv(csv_file.getvalue())
+        except ValueError as exc:
+            st.error(f"Could not read the expected-values CSV: {exc}")
+            st.stop()
+    else:
+        missing = missing_fields(shared_expected)
+        if missing:
+            st.warning(
+                "Please fill in all required expected values before verifying. "
+                "Missing: " + ", ".join(missing) + "."
+            )
+            st.stop()
 
     st.subheader(f"Results ({len(uploaded_files)} label{'s' if len(uploaded_files) != 1 else ''})")
 
@@ -128,6 +161,26 @@ if submitted:
             st.image(uploaded.getvalue(), use_container_width=True)
 
         with result_col:
+            if csv_map is not None:
+                expected = expected_for(uploaded.name, csv_map)
+                if expected is None:
+                    st.warning(
+                        f"No row for **{uploaded.name}** in the CSV — skipped. "
+                        "Add a row with this exact filename, or remove the CSV "
+                        "to use the shared values."
+                    )
+                    continue
+                row_missing = missing_fields(expected)
+                if row_missing:
+                    st.warning(
+                        f"The CSV row for **{uploaded.name}** is missing "
+                        + ", ".join(row_missing)
+                        + " — skipped."
+                    )
+                    continue
+            else:
+                expected = shared_expected
+
             try:
                 start = time.perf_counter()
                 with st.spinner("Reading label…"):
@@ -144,7 +197,17 @@ if submitted:
                 st.error(f"Could not verify **{uploaded.name}**: {exc}")
                 continue
 
-            headline, banner = _overall(results := verify(expected, extracted))
+            # Overall banner reflects the automated field comparisons. The
+            # visual-format row is appended as a standing manual-review item.
+            results = verify(expected, extracted)
+            headline, banner = _overall(results)
             getattr(st, banner)(headline)
+
             st.caption(f"Processed in {elapsed:.1f} seconds")
-            _render_table(results)
+            if elapsed > LATENCY_TARGET_SECONDS:
+                st.warning(
+                    f"This label took {elapsed:.1f}s, over the "
+                    f"{LATENCY_TARGET_SECONDS:.0f}s target response time."
+                )
+
+            _render_table(results + [warning_visual_format_result()])
