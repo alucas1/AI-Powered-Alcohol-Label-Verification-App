@@ -78,6 +78,12 @@ A few behaviors are worth calling out:
 - **Full warning on demand.** The government warning is long, so the grid shows a
   truncated cell; a **Show full government warning** expander under each result
   reveals the complete expected-vs-extracted text for side-by-side comparison.
+- **Manual overrides.** Disagree with an automated check? An **Overrides** panel
+  under each result lets you set any field to PASS or FAIL with an optional
+  reason. Overridden fields read `PASS (manual)` / `FAIL (manual)` in the grid and
+  the results CSV (the reason defaults to "Manually passed/failed" if left blank).
+  The top-line banner still reflects the automated verdict, so a manual decision
+  never hides what the model found.
 - **Response time.** Stakeholder feedback set a ~5 second per-label target. Each
   result shows its processing time, and anything over five seconds is flagged so
   the lag is visible. A hard request timeout (`REQUEST_TIMEOUT` in `label_ai.py`)
