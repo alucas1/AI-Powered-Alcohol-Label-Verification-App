@@ -12,6 +12,19 @@ def test_verbatim_with_surrounding_text_passes():
     assert _compare_warning("Warning", STANDARD_WARNING, extracted).status is Status.PASS
 
 
+def test_header_wrapped_across_lines_passes():
+    # OCR/vision transcriptions often break the header onto two lines. The all-caps
+    # colon is intact, so the warning must still be recognized rather than reported
+    # as missing.
+    extracted = STANDARD_WARNING.replace("GOVERNMENT WARNING:", "GOVERNMENT\nWARNING:")
+    assert _compare_warning("Warning", STANDARD_WARNING, extracted).status is Status.PASS
+
+
+def test_doubled_internal_spacing_passes():
+    extracted = STANDARD_WARNING.replace(" ", "  ")
+    assert _compare_warning("Warning", STANDARD_WARNING, extracted).status is Status.PASS
+
+
 def test_lowercase_header_fails():
     extracted = STANDARD_WARNING.replace("GOVERNMENT WARNING:", "Government Warning:")
     result = _compare_warning("Warning", STANDARD_WARNING, extracted)
