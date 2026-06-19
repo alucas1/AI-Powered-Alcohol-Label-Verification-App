@@ -105,25 +105,28 @@ def _manual_review_row(filename: str, confirmed: bool) -> dict:
     }
 
 
-def results_to_csv(verified: Iterable[tuple[str, list[FieldResult], bool]]) -> str:
+def results_to_csv(verified: Iterable[tuple[str, list[FieldResult], bool, dict]]) -> str:
     """Flatten a verified batch into one CSV: one row per field per image, then a
     manual-review row per image.
 
-    `verified` is an iterable of (filename, results, visual_confirmed) tuples,
-    where `results` is the comparison rows shown for that image and
-    `visual_confirmed` is the reviewer's checkbox state. Comparison statuses use
-    the same human-readable labels as the on-screen table. Returns CSV text.
+    `verified` is an iterable of (filename, results, visual_confirmed, overrides)
+    tuples. `results` is the comparison rows shown for that image,
+    `visual_confirmed` is the reviewer's checkbox state, and `overrides` maps a
+    result index to a (status, explanation) pair that replaces the automated
+    verdict for that field. Returns CSV text.
     """
     records = []
-    for filename, results, confirmed in verified:
-        for r in results:
+    for filename, results, confirmed, overrides in verified:
+        overrides = overrides or {}
+        for j, r in enumerate(results):
+            status, explanation = overrides.get(j, (STATUS_LABEL[r.status], r.explanation))
             records.append({
                 "filename": filename,
                 "field": r.field,
                 "expected": r.expected,
                 "extracted": r.extracted,
-                "status": STATUS_LABEL[r.status],
-                "explanation": r.explanation,
+                "status": status,
+                "explanation": explanation,
             })
         records.append(_manual_review_row(filename, confirmed))
     return pd.DataFrame(records, columns=RESULTS_CSV_COLUMNS).to_csv(index=False)
