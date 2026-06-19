@@ -372,24 +372,31 @@ if batch:
                     'automated check. Overrides are marked "(manual)" in the grid '
                     "and the CSV; the banner keeps the automated verdict."
                 )
+                # Render the Result/Reason controls for every field (disabled
+                # until the field is ticked) rather than revealing them on tick.
+                # Adding widgets to the expander on the first click would change
+                # its subtree, which makes Streamlit remount the expander and snap
+                # it shut — keeping the structure constant avoids that.
                 for j, r in enumerate(results):
-                    if st.checkbox(f"Override {r.field}", key=f"ovr_on_{i}_{j}"):
-                        oc1, oc2 = st.columns([1, 2])
-                        with oc1:
-                            st.radio(
-                                "Result",
-                                ["PASS", "FAIL"],
-                                horizontal=True,
-                                key=f"ovr_status_{i}_{j}",
-                                label_visibility="collapsed",
-                            )
-                        with oc2:
-                            st.text_input(
-                                "Reason",
-                                placeholder="Reason for override (optional)",
-                                key=f"ovr_reason_{i}_{j}",
-                                label_visibility="collapsed",
-                            )
+                    on = st.checkbox(f"Override {r.field}", key=f"ovr_on_{i}_{j}")
+                    oc1, oc2 = st.columns([1, 2])
+                    with oc1:
+                        st.radio(
+                            "Result",
+                            ["PASS", "FAIL"],
+                            horizontal=True,
+                            key=f"ovr_status_{i}_{j}",
+                            label_visibility="collapsed",
+                            disabled=not on,
+                        )
+                    with oc2:
+                        st.text_input(
+                            "Reason",
+                            placeholder="Reason for override (optional)",
+                            key=f"ovr_reason_{i}_{j}",
+                            label_visibility="collapsed",
+                            disabled=not on,
+                        )
 
     # One combined CSV of every verified label, carrying each label's manual
     # visual-format confirmation. Built every rerun, so ticking a box updates the
