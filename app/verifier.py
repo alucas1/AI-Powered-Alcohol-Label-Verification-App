@@ -45,6 +45,16 @@ class FieldResult:
     explanation: str
 
 
+# Human-readable label per status, shared by the on-screen table and the
+# downloadable results CSV so both read identically.
+STATUS_LABEL = {
+    Status.PASS: "PASS",
+    Status.WARNING: "WARNING",
+    Status.FAIL: "FAIL",
+    Status.NEEDS_REVIEW: "NEEDS REVIEW",
+}
+
+
 # --- text normalization ------------------------------------------------------
 
 _PUNCT_RE = re.compile(r"[^\w\s]")
