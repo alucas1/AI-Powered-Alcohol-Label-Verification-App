@@ -128,8 +128,8 @@ labels automatically.
 
 **Government warning** — The app verifies the wording and capitalization
 automatically, but bold text, type size, placement, and separation from other
-copy cannot be judged from an image. Each result includes a manual check box to
-confirm those by eye.
+copy cannot be reliably judged from an image by AI. Each result includes a manual
+check box to confirm those by eye.
 
 **Results** — Each label shows its processing time (target: about five seconds).
 After a batch, you can download every result as a single CSV.
