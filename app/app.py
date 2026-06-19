@@ -72,22 +72,28 @@ def _truncate(text: str, limit: int = 75) -> str:
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
 
-def _render_table(results: list[FieldResult]) -> None:
-    df = pd.DataFrame(
-        [
+def _render_table(results: list[FieldResult], overrides: dict[int, tuple[str, str]] | None = None) -> None:
+    """Render the comparison grid. `overrides` maps a result index to a
+    (status, explanation) pair that replaces the automated verdict for that
+    field; overridden statuses read e.g. "PASS (manual)"."""
+    overrides = overrides or {}
+    rows = []
+    for j, r in enumerate(results):
+        status, explanation = overrides.get(j, (STATUS_LABEL[r.status], r.explanation))
+        rows.append(
             {
                 "Field": r.field,
                 "Expected": _truncate(r.expected) or "—",
                 "Extracted from Label": _truncate(r.extracted) or "—",
-                "Status": STATUS_LABEL[r.status],
-                "Explanation": r.explanation,
+                "Status": status,
+                "Explanation": explanation,
             }
-            for r in results
-        ]
-    )
+        )
+    df = pd.DataFrame(rows)
 
     def _color(val):
-        return _STATUS_COLOR.get(val, "")
+        # Overridden cells read "PASS (manual)"/"FAIL (manual)"; colour by the base.
+        return _STATUS_COLOR.get(val.replace(" (manual)", ""), "")
 
     # st.table (not st.dataframe) so long explanations wrap onto multiple lines
     # and stay fully visible, instead of being truncated in a scrollable grid.
@@ -187,8 +193,9 @@ with st.form("verification_form"):
 
 if submitted or run_demo:
     st.session_state.pop("batch", None)  # drop any previous run's results
-    # Reset per-label visual-format confirmations so they don't carry over.
-    for k in [k for k in st.session_state if k.startswith("vf_confirm_")]:
+    # Reset per-label manual inputs (visual-format confirmations and overrides)
+    # so they don't carry over to a new batch.
+    for k in [k for k in st.session_state if k.startswith(("vf_confirm_", "ovr_"))]:
         del st.session_state[k]
 
     # "Run demo files" verifies the bundled sample set via its CSV, no form input
@@ -281,6 +288,7 @@ if batch:
     st.subheader(f"Results ({count} label{'s' if count != 1 else ''})")
 
     confirmations = {}  # entry index -> visual-format checkbox state
+    overrides_by_entry = {}  # entry index -> {result index: (status, explanation)}
     for i, entry in enumerate(batch):
         st.divider()
         st.markdown(f"#### {entry['name']}")
@@ -315,7 +323,19 @@ if batch:
                     f"{LATENCY_TARGET_SECONDS:.0f}s target response time."
                 )
 
-            _render_table(results)
+            # Manual overrides are read from session_state here; the widgets that
+            # set them live in the "Overrides" panel below. A ticked field
+            # replaces the automated verdict in the grid and the CSV.
+            overrides = {}
+            for j, r in enumerate(results):
+                if st.session_state.get(f"ovr_on_{i}_{j}", False):
+                    status = st.session_state.get(f"ovr_status_{i}_{j}", "PASS")
+                    reason = str(st.session_state.get(f"ovr_reason_{i}_{j}", "")).strip()
+                    explanation = reason or f"Manually {'passed' if status == 'PASS' else 'failed'}."
+                    overrides[j] = (f"{status} (manual)", explanation)
+            overrides_by_entry[i] = overrides
+
+            _render_table(results, overrides)
 
             # The government warning is long; the grid shows a truncated cell, so
             # offer the full expected-vs-extracted text on demand.
@@ -337,11 +357,38 @@ if batch:
                     key=f"vf_confirm_{i}",
                 )
 
+            # Per-field manual overrides. These widgets write to session_state and
+            # take effect on the next rerun, where they're read above the grid.
+            with st.expander("Overrides"):
+                st.caption(
+                    "Manually set a field's result when you disagree with the "
+                    'automated check. Overrides are marked "(manual)" in the grid '
+                    "and the CSV; the banner keeps the automated verdict."
+                )
+                for j, r in enumerate(results):
+                    if st.checkbox(f"Override {r.field}", key=f"ovr_on_{i}_{j}"):
+                        oc1, oc2 = st.columns([1, 2])
+                        with oc1:
+                            st.radio(
+                                "Result",
+                                ["PASS", "FAIL"],
+                                horizontal=True,
+                                key=f"ovr_status_{i}_{j}",
+                                label_visibility="collapsed",
+                            )
+                        with oc2:
+                            st.text_input(
+                                "Reason",
+                                placeholder="Reason for override (optional)",
+                                key=f"ovr_reason_{i}_{j}",
+                                label_visibility="collapsed",
+                            )
+
     # One combined CSV of every verified label, carrying each label's manual
     # visual-format confirmation. Built every rerun, so ticking a box updates the
     # download's contents. Skipped/errored files are left out.
     verified = [
-        (entry["name"], entry["results"], confirmations.get(i, False))
+        (entry["name"], entry["results"], confirmations.get(i, False), overrides_by_entry.get(i, {}))
         for i, entry in enumerate(batch)
         if "results" in entry
     ]
