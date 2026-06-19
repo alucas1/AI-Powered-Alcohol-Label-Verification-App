@@ -1,18 +1,24 @@
-"""Expected-value inputs: required-field validation and optional CSV-per-file
-batch loading.
+"""Batch CSV handling: required-field validation, per-file expected-value
+loading, and exporting verified results.
 
 Pure helpers (pandas only, no Streamlit or network), so the UI can stay thin and
-the matching rules stay unit-testable. The UI offers two modes:
+the rules stay unit-testable. The UI offers two input modes:
 
 - Shared: one set of expected values typed once, applied to every image.
 - CSV: a per-image override, matched to the upload by filename.
+
+and, after a batch is verified, hands the combined results back as a single
+downloadable CSV.
 """
 
 from __future__ import annotations
 
 import io
+from typing import Iterable
 
 import pandas as pd
+
+from verifier import STATUS_LABEL, FieldResult
 
 # Form key -> human label, in display order. These are the five values a
 # reviewer must supply for every label before it can be verified.
@@ -78,3 +84,29 @@ def expected_for(filename, csv_map: dict[str, dict]) -> dict | None:
     """Expected values for an uploaded image, matched by filename, or None when
     the CSV carries no row for it."""
     return csv_map.get(_normalize_name(filename))
+
+
+# Columns of the downloadable results CSV: one row per field per image.
+RESULTS_CSV_COLUMNS = ["filename", "field", "expected", "extracted", "status", "explanation"]
+
+
+def results_to_csv(verified: Iterable[tuple[str, list[FieldResult]]]) -> str:
+    """Flatten a verified batch into one CSV, one row per field per image.
+
+    `verified` is an iterable of (filename, results) pairs, where `results` is
+    the list of FieldResult rows already shown for that image. Statuses use the
+    same human-readable labels as the on-screen table. Returns CSV text.
+    """
+    records = [
+        {
+            "filename": filename,
+            "field": r.field,
+            "expected": r.expected,
+            "extracted": r.extracted,
+            "status": STATUS_LABEL[r.status],
+            "explanation": r.explanation,
+        }
+        for filename, results in verified
+        for r in results
+    ]
+    return pd.DataFrame(records, columns=RESULTS_CSV_COLUMNS).to_csv(index=False)
