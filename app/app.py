@@ -13,9 +13,16 @@ import time
 import pandas as pd
 import streamlit as st
 
-from batch import expected_for, load_expected_csv, missing_fields
+from batch import expected_for, load_expected_csv, missing_fields, results_to_csv
 from label_ai import ExtractionError, MissingAPIKeyError, extract_label_fields
-from verifier import STANDARD_WARNING, FieldResult, Status, verify, warning_visual_format_result
+from verifier import (
+    STANDARD_WARNING,
+    STATUS_LABEL,
+    FieldResult,
+    Status,
+    verify,
+    warning_visual_format_result,
+)
 
 st.set_page_config(page_title="Alcohol Label Verification", layout="wide")
 
@@ -23,13 +30,7 @@ st.set_page_config(page_title="Alcohol Label Verification", layout="wide")
 # Slower labels still render; they're flagged so the lag is visible, not hidden.
 LATENCY_TARGET_SECONDS = 5.0
 
-# Per-status display label and result-table cell colour.
-_STATUS_LABEL = {
-    Status.PASS: "PASS",
-    Status.WARNING: "WARNING",
-    Status.FAIL: "FAIL",
-    Status.NEEDS_REVIEW: "NEEDS REVIEW",
-}
+# Result-table cell colour per status label (labels come from verifier.STATUS_LABEL).
 _STATUS_COLOR = {
     "PASS": "background-color: #e6f4ea",
     "WARNING": "background-color: #fff4e5",
@@ -59,7 +60,7 @@ def _render_table(results: list[FieldResult]) -> None:
                 "Field": r.field,
                 "Expected": r.expected or "—",
                 "Extracted from Label": r.extracted or "—",
-                "Status": _STATUS_LABEL[r.status],
+                "Status": STATUS_LABEL[r.status],
                 "Explanation": r.explanation,
             }
             for r in results
@@ -70,7 +71,7 @@ def _render_table(results: list[FieldResult]) -> None:
         return _STATUS_COLOR.get(val, "")
 
     styler = df.style.map(_color, subset=["Status"])
-    st.dataframe(styler, hide_index=True, use_container_width=True)
+    st.dataframe(styler, hide_index=True, width="stretch")
 
 
 # --- Header ------------------------------------------------------------------
@@ -116,11 +117,16 @@ with st.form("verification_form"):
     )
     csv_file = st.file_uploader("Expected-values CSV", type=["csv"])
 
-    submitted = st.form_submit_button("Verify Labels", type="primary", use_container_width=True)
+    submitted = st.form_submit_button("Verify Labels", type="primary", width="stretch")
 
-# --- Processing --------------------------------------------------------------
+# --- Processing: verify on submit, store the batch in session_state ----------
+#
+# Results are kept in session_state so they survive the rerun that a download
+# click triggers — the AI provider is never re-called just to redraw the page.
 
 if submitted:
+    st.session_state.pop("batch", None)  # drop any previous run's results
+
     if not uploaded_files:
         st.warning("Please upload at least one label image to verify.")
         st.stop()
@@ -152,59 +158,85 @@ if submitted:
             )
             st.stop()
 
-    st.subheader(f"Results ({len(uploaded_files)} label{'s' if len(uploaded_files) != 1 else ''})")
-
+    batch = []
     for uploaded in uploaded_files:
+        entry = {"name": uploaded.name, "image": uploaded.getvalue()}
+
+        if csv_map is not None:
+            expected = expected_for(uploaded.name, csv_map)
+            if expected is None:
+                entry["skip"] = (
+                    "No row for this file in the CSV — skipped. Add a row with this "
+                    "exact filename, or remove the CSV to use the shared values."
+                )
+                batch.append(entry)
+                continue
+            row_missing = missing_fields(expected)
+            if row_missing:
+                entry["skip"] = "CSV row is missing " + ", ".join(row_missing) + " — skipped."
+                batch.append(entry)
+                continue
+        else:
+            expected = shared_expected
+
+        try:
+            start = time.perf_counter()
+            with st.spinner(f"Reading {uploaded.name}…"):
+                extracted = extract_label_fields(uploaded.getvalue())
+            entry["elapsed"] = time.perf_counter() - start
+        except MissingAPIKeyError:
+            st.error(
+                "**No OpenAI API key configured.** Add `OPENAI_API_KEY` to "
+                "`.streamlit/secrets.toml` (local) or the app's **Secrets** "
+                "settings (Streamlit Cloud), then try again."
+            )
+            st.stop()
+        except ExtractionError as exc:
+            entry["error"] = str(exc)
+            batch.append(entry)
+            continue
+
+        entry["results"] = verify(expected, extracted)
+        batch.append(entry)
+
+    st.session_state["batch"] = batch
+
+# --- Results: render from session_state --------------------------------------
+
+batch = st.session_state.get("batch")
+if batch:
+    count = len(batch)
+    st.subheader(f"Results ({count} label{'s' if count != 1 else ''})")
+
+    for entry in batch:
         st.divider()
-        st.markdown(f"#### {uploaded.name}")
+        st.markdown(f"#### {entry['name']}")
         image_col, result_col = st.columns([1, 2])
 
         with image_col:
-            st.image(uploaded.getvalue(), use_container_width=True)
+            # st.image decodes the bytes to render them and raises on anything
+            # that isn't a real image (the uploader filters by extension, not
+            # content). Guard it so one bad upload can't crash the whole page.
+            try:
+                st.image(entry["image"], width="stretch")
+            except Exception:
+                st.caption("Preview unavailable for this file.")
 
         with result_col:
-            if csv_map is not None:
-                expected = expected_for(uploaded.name, csv_map)
-                if expected is None:
-                    st.warning(
-                        f"No row for **{uploaded.name}** in the CSV — skipped. "
-                        "Add a row with this exact filename, or remove the CSV "
-                        "to use the shared values."
-                    )
-                    continue
-                row_missing = missing_fields(expected)
-                if row_missing:
-                    st.warning(
-                        f"The CSV row for **{uploaded.name}** is missing "
-                        + ", ".join(row_missing)
-                        + " — skipped."
-                    )
-                    continue
-            else:
-                expected = shared_expected
-
-            try:
-                start = time.perf_counter()
-                with st.spinner("Reading label…"):
-                    extracted = extract_label_fields(uploaded.getvalue())
-                elapsed = time.perf_counter() - start
-            except MissingAPIKeyError:
-                st.error(
-                    "**No OpenAI API key configured.** Add `OPENAI_API_KEY` to "
-                    "`.streamlit/secrets.toml` (local) or the app's **Secrets** "
-                    "settings (Streamlit Cloud), then try again."
-                )
-                st.stop()
-            except ExtractionError as exc:
-                st.error(f"Could not verify **{uploaded.name}**: {exc}")
+            if "skip" in entry:
+                st.warning(entry["skip"])
+                continue
+            if "error" in entry:
+                st.error(f"Could not verify **{entry['name']}**: {entry['error']}")
                 continue
 
-            # Overall banner reflects the automated field comparisons. The
+            # Overall banner reflects the automated field comparisons; the
             # visual-format row is appended as a standing manual-review item.
-            results = verify(expected, extracted)
+            results = entry["results"]
             headline, banner = _overall(results)
             getattr(st, banner)(headline)
 
+            elapsed = entry["elapsed"]
             st.caption(f"Processed in {elapsed:.1f} seconds")
             if elapsed > LATENCY_TARGET_SECONDS:
                 st.warning(
@@ -213,3 +245,19 @@ if submitted:
                 )
 
             _render_table(results + [warning_visual_format_result()])
+
+    # One combined CSV of every verified label; skipped/errored files are left out.
+    verified = [
+        (entry["name"], entry["results"] + [warning_visual_format_result()])
+        for entry in batch
+        if "results" in entry
+    ]
+    if verified:
+        st.divider()
+        st.download_button(
+            "Download all results (CSV)",
+            data=results_to_csv(verified),
+            file_name="label_verification_results.csv",
+            mime="text/csv",
+            width="stretch",
+        )
