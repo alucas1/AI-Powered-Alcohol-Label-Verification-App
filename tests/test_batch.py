@@ -1,8 +1,12 @@
-"""CSV-per-file expected-value loading and filename matching."""
+"""CSV-per-file expected-value loading, filename matching, and results export."""
+
+import csv as csvlib
+import io
 
 import pytest
 
-from batch import expected_for, load_expected_csv
+from batch import RESULTS_CSV_COLUMNS, expected_for, load_expected_csv, results_to_csv
+from verifier import FieldResult, Status
 
 CSV = (
     "filename,brand_name,class_type,alcohol_content,net_contents,government_warning\n"
@@ -59,3 +63,31 @@ def test_blank_filename_raises():
     )
     with pytest.raises(ValueError, match="filename"):
         load_expected_csv(blank.encode())
+
+
+# --- results export -----------------------------------------------------------
+
+
+def _rows(*results):
+    return [FieldResult(field, "exp", "ext", status, "why") for field, status in results]
+
+
+def test_results_csv_has_one_row_per_field_per_image():
+    verified = [
+        ("a.png", _rows(("Brand Name", Status.PASS), ("Alcohol Content", Status.FAIL))),
+        ("b.png", _rows(("Brand Name", Status.WARNING))),
+    ]
+    rows = list(csvlib.DictReader(io.StringIO(results_to_csv(verified))))
+    assert [r["filename"] for r in rows] == ["a.png", "a.png", "b.png"]
+    assert [r["field"] for r in rows] == ["Brand Name", "Alcohol Content", "Brand Name"]
+
+
+def test_results_csv_uses_human_readable_status_labels():
+    verified = [("a.png", _rows(("Government Warning", Status.NEEDS_REVIEW)))]
+    rows = list(csvlib.DictReader(io.StringIO(results_to_csv(verified))))
+    assert rows[0]["status"] == "NEEDS REVIEW"  # not the enum's "NEEDS_REVIEW"
+
+
+def test_results_csv_header_matches_columns():
+    header = results_to_csv([]).splitlines()[0]
+    assert header.split(",") == RESULTS_CSV_COLUMNS
