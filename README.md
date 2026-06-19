@@ -1,5 +1,7 @@
 # AI-Powered Alcohol Label Verification
 
+**Live demo:** https://ai-alcohol-label-verifier.streamlit.app
+
 A prototype that helps TTB compliance reviewers check alcohol beverage labels. A
 reviewer enters the values from a label application, uploads the label image(s),
 and the app reads each label with a vision model and compares it, field by field,
@@ -43,6 +45,31 @@ the model:
   capitals followed by a colon, and the statement must match word for word. Title
   case or reworded text fails.
 
+## Using the app
+
+A few behaviors are worth calling out:
+
+- **Required fields.** All five expected values — brand name, class/type, alcohol
+  content, net contents, and the government warning — must be filled in before a
+  label is verified. Submitting with any blank lists the missing fields and stops
+  before any AI call, so an incomplete form never burns an API request.
+- **Batch expected values.** By default one set of expected values applies to
+  every uploaded image, i.e. several photos of the same application. To verify
+  different labels in one pass, upload an optional CSV with columns `filename,
+  brand_name, class_type, alcohol_content, net_contents, government_warning` — one
+  row per image. Each image is matched to its row by filename (case-insensitive).
+  A file with no matching row, or a row missing required values, is flagged and
+  skipped rather than verified against the wrong data.
+- **Warning visual formatting.** Wording and header capitalization are checked
+  automatically, but type size, weight, placement, and separation from other copy
+  can't be judged from a text transcription. Every result therefore carries a
+  standing **Warning Visual Format** row marked NEEDS REVIEW, directing a human to
+  confirm bold `GOVERNMENT WARNING:`, legibility, type size, and placement by eye.
+- **Response time.** Stakeholder feedback set a ~5 second per-label target. Each
+  result shows its processing time, and anything over five seconds is flagged so
+  the lag is visible. A hard request timeout (`REQUEST_TIMEOUT` in `label_ai.py`)
+  turns a hung call into a clean, user-facing error instead of an indefinite wait.
+
 ## Architecture
 
 Three concerns, kept separate so the AI provider can change without touching the
@@ -54,12 +81,16 @@ UI or the comparison rules:
 ├── app/
 │   ├── app.py                  # Streamlit UI and orchestration
 │   ├── label_ai.py             # the only module that calls the AI provider
+│   ├── batch.py                # required-field validation and CSV-per-file loading
 │   └── verifier.py             # comparison logic; no UI, no network
-├── tests/                      # pytest suite for verifier.py, one file per concern
+├── tests/                      # pytest suite, one file per concern
 │   ├── test_text_fields.py
 │   ├── test_alcohol.py
 │   ├── test_net_contents.py
 │   ├── test_warning.py
+│   ├── test_warning_visual_format.py
+│   ├── test_validation.py
+│   ├── test_batch.py
 │   ├── test_verify.py
 │   └── make_sample_labels.py   # generates a synthetic label for local testing
 ├── requirements.txt
@@ -127,6 +158,9 @@ Or via the environment: `export OPENAI_API_KEY=...` and `export OPENAI_MODEL=...
 
 ## Deploying to Streamlit Community Cloud
 
+A live instance runs at https://ai-alcohol-label-verifier.streamlit.app. To stand
+up your own:
+
 1. Push the repository to GitHub.
 2. Create a new app at https://share.streamlit.io pointing at `app/app.py`.
 3. Add the key under the app's Settings > Secrets:
@@ -142,10 +176,10 @@ It's a prototype, and a few choices reflect that:
 - The provider is isolated in `label_ai.py`, so moving to another model or vendor
   is a one-file change. `gpt-5.4-nano` is the default: fast and cheap enough for
   the latency budget, and it supports JSON output.
-- One set of expected values applies to every image in a batch, i.e. a batch is
-  treated as several photos of the same application, not many different ones. A
-  production tool would pair each image with its own application record (CSV
-  import or COLA lookup).
+- By default one set of expected values applies to every image in a batch, i.e. a
+  batch is treated as several photos of the same application. An optional CSV
+  pairs each image with its own expected values for mixed batches; a production
+  tool would pull those from COLA rather than a hand-authored CSV.
 - The thresholds (fuzzy >= 90%, ABV +/-0.1, ~1% volume tolerance) are reasonable
   defaults, not TTB-calibrated tolerances.
 - The warning check covers header casing and the standard text. It does not check
@@ -173,7 +207,7 @@ address at least:
 
 ## Future work
 
-- Pair each image with its own application record (CSV import or COLA).
+- Pull per-image expected values from COLA instead of a hand-authored CSV.
 - Parallelize batch extraction to hold the latency budget on large batches.
 - Surface per-field confidence and bounding-box highlights.
 - Make tolerances configurable and TTB-calibrated per beverage type.
