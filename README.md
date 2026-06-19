@@ -191,11 +191,17 @@ pytest
 ```
 
 `tests/test_sample_files.py` also carries a live, end-to-end check that sends the
-sample images to the model and validates the results. It's skipped by default —
-it makes real API calls and its output varies between runs — and is enabled with:
+sample images to the model and validates the results. It runs by default, but
+only after a precheck confirms a usable key and a reachable model: the precheck
+calls `models.retrieve` to prove both the key and the configured model are valid,
+and if either isn't (no key, bad key, unknown model, no network) the live tests
+skip with the reason rather than fail — so an offline checkout still passes. These
+calls hit the real API, cost money, and vary slightly between runs, so a single
+failure is worth a re-run before treating it as a regression. To opt out even when
+a valid key is present:
 
 ```bash
-RUN_LIVE_EXTRACTION=1 pytest tests/test_sample_files.py
+SKIP_LIVE_EXTRACTION=1 pytest
 ```
 
 ### Configuration
@@ -218,7 +224,7 @@ up your own:
 
 1. Push the repository to GitHub.
 2. Create a new app at https://share.streamlit.io pointing at `app/app.py`.
-3. Add the key under the app's Settings > Secrets:
+3. Add the key under the app's Advanced Settings > Secrets:
    ```toml
    OPENAI_API_KEY = "sk-..."
    ```
