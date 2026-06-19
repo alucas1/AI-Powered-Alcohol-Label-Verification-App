@@ -137,8 +137,15 @@ automatically, but bold text, type size, placement, and separation from other
 copy cannot be reliably judged from an image by AI. Each result includes a manual
 check box to confirm those by eye.
 
+**Changing a result (overrides)** — If you disagree with an automated check, open
+the **Overrides** panel under that result, tick the field, and set it to PASS or
+FAIL with an optional reason. Overridden fields are marked "(manual)" in the table
+and the downloaded CSV. The summary at the top of each result always reflects the
+automated checks, so an override never hides what the model found.
+
 **Results** — Each label shows its processing time (target: about five seconds).
-After a batch, you can download every result as a single CSV.
+After a batch, use **Download all results (CSV)** to export every field of every
+label, along with your visual-format confirmations and any overrides.
         """
     )
 
