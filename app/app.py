@@ -47,7 +47,9 @@ def _overall(results: list[FieldResult]):
         return "Some fields need manual review.", "warning"
     if Status.WARNING in statuses:
         return "Passed with minor differences to confirm.", "warning"
-    return "All checks passed.", "success"
+    # Never claim a blanket pass: the warning's visual formatting is always a
+    # manual check (see the Warning Visual Format row), so say so here too.
+    return "Automated checks passed — confirm the warning's visual format by eye.", "success"
 
 
 def _render_table(results: list[FieldResult]) -> None:
