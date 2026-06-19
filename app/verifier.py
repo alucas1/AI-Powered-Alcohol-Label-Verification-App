@@ -222,25 +222,29 @@ def _compare_warning(field: str, expected, extracted) -> FieldResult:
                        f"Government warning does not match the required statement word-for-word ({score:.0f}% similar).")
 
 
-def warning_visual_format_result() -> FieldResult:
-    """Advisory row for the government warning's visual formatting.
+# The visual formatting of the warning — bold header, type size, placement,
+# separation — can't be judged from a text transcription. This note explains the
+# limitation; the UI surfaces it as a manual-confirmation step rather than a
+# false PASS, an honest hand-off to a human.
+VISUAL_FORMAT_NOTE = (
+    "Wording and capitalization are verified automatically. A reviewer must still "
+    "confirm the visual formatting by eye: bold 'GOVERNMENT WARNING:', legible "
+    "type size, placement, and clear separation from other label information."
+)
 
-    `_compare_warning` checks the wording and the all-caps header from a text
-    transcription, but a transcription carries no type size, weight, placement,
-    or whitespace. Those rules can't be judged here, so this row is always
-    NEEDS_REVIEW: an honest hand-off to a human rather than a false PASS.
+
+def warning_visual_format_result() -> FieldResult:
+    """The visual-format manual-review item as a FieldResult (always NEEDS_REVIEW).
+
+    Kept as a single source for the field name and note; the UI renders it as a
+    confirmation checkbox rather than a comparison-grid row.
     """
     return FieldResult(
         field="Warning Visual Format",
         expected="",
         extracted="",
         status=Status.NEEDS_REVIEW,
-        explanation=(
-            "Wording and capitalization are verified automatically. A reviewer "
-            "must still confirm the visual formatting by eye: bold "
-            "'GOVERNMENT WARNING:', legible type size, placement, and clear "
-            "separation from other label information."
-        ),
+        explanation=VISUAL_FORMAT_NOTE,
     )
 
 
