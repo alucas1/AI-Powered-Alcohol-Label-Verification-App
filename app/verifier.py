@@ -200,15 +200,19 @@ def _compare_warning(field: str, expected, extracted) -> FieldResult:
         return FieldResult(field, exp, "", Status.NEEDS_REVIEW,
                            "No government warning text was detected on the label — please review manually.")
 
+    # Collapse whitespace (but keep case and punctuation) before any comparison.
+    # Transcriptions routinely break the header across lines or double-space it;
+    # the all-caps colon is what TTB requires, not the exact spacing around it.
+    exp_norm, ext_norm = _collapse_ws(exp), _collapse_ws(ext)
+
     # Hard TTB rule: the header must be all-caps with a trailing colon.
-    if "GOVERNMENT WARNING:" not in ext:
-        if "government warning" in ext.lower():
+    if "GOVERNMENT WARNING:" not in ext_norm:
+        if "government warning" in ext_norm.lower():
             return FieldResult(field, exp, ext, Status.FAIL,
                                "'GOVERNMENT WARNING:' must appear in ALL CAPITAL LETTERS followed by a colon.")
         return FieldResult(field, exp, ext, Status.FAIL,
                            "The required 'GOVERNMENT WARNING:' statement was not found on the label.")
 
-    exp_norm, ext_norm = _collapse_ws(exp), _collapse_ws(ext)
     if exp_norm == ext_norm:
         return FieldResult(field, exp, ext, Status.PASS,
                            "Government warning matches the required statement exactly.")
