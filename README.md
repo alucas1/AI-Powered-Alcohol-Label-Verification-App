@@ -106,6 +106,7 @@ or the comparison rules:
 .
 ├── .streamlit/                 # config.toml + secrets, resolved from the run directory
 ├── app/
+│   ├── README.md               # developer map of the package
 │   ├── app.py                  # Streamlit UI and orchestration
 │   ├── label_ai.py             # the only module that calls the AI provider (with retry/backoff)
 │   ├── pipeline.py             # concurrent batch fan-out; no UI, no provider details
@@ -128,7 +129,13 @@ or the comparison rules:
 │   ├── test_app_ui.py          # end-to-end UI via Streamlit AppTest (checkboxes, overrides, CSV)
 │   ├── test_sample_files.py    # end-to-end checks over the bundled sample set
 │   └── make_sample_labels.py   # generates a synthetic label for local testing
-├── test_files/                 # bundled sample labels + CSV (used by the demo and tests)
+├── test_files/                 # bundled sample set (used by the demo and tests)
+│   ├── README.md               # per-label expected results and rationale
+│   ├── old_tom_distillery.png
+│   ├── silver_coast.png
+│   ├── stones_throw.png
+│   ├── monarch_hill.png
+│   └── sample_label_batch_test.csv  # expected values, one row per image
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── pytest.ini
