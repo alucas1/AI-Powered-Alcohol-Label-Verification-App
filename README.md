@@ -120,9 +120,12 @@ or the comparison rules:
 │   ├── test_warning_visual_format.py
 │   ├── test_validation.py
 │   ├── test_batch.py
+│   ├── test_csv_edge.py        # CSV loader robustness (BOM, quoting, unicode)
+│   ├── test_label_ai.py        # extraction layer: image prep, response/error paths
 │   ├── test_pipeline.py        # concurrent batch orchestration: order, bound, skips, progress
 │   ├── test_retry.py           # provider retry/backoff schedule
 │   ├── test_verify.py
+│   ├── test_app_ui.py          # end-to-end UI via Streamlit AppTest (checkboxes, overrides, CSV)
 │   ├── test_sample_files.py    # end-to-end checks over the bundled sample set
 │   └── make_sample_labels.py   # generates a synthetic label for local testing
 ├── test_files/                 # bundled sample labels + CSV (used by the demo and tests)
@@ -192,12 +195,15 @@ python tests/make_sample_labels.py   # writes sample_labels/old_tom_distillery.p
 ### Tests
 
 The pytest suite covers the deterministic logic: `verifier.py`'s field
-comparisons, `batch.py`'s validation, CSV loading, and results export,
-`pipeline.py`'s concurrent fan-out (ordering, the worker bound, skips, per-file
-error isolation, progress), `label_ai.py`'s retry/backoff schedule, plus an
-end-to-end pass over the bundled sample set. The concurrency and retry tests
-inject fakes for the thread pool's work and the sleep, so they stay deterministic
-and never touch the network.
+comparisons, `batch.py`'s validation, CSV loading (including malformed and
+non-ASCII inputs), and results export, `pipeline.py`'s concurrent fan-out
+(ordering, the worker bound, skips, per-file error isolation, progress),
+`label_ai.py`'s image preparation, response handling, and retry/backoff schedule,
+and an end-to-end pass over the bundled sample set. It also drives the Streamlit
+UI through `AppTest` to confirm the checkbox and override flow produces the right
+results CSV. The orchestration, retry, extraction, and UI tests fake the network
+and the clock, so they stay deterministic and run offline. See
+[`tests/README.md`](tests/README.md) for the full layout.
 
 ```bash
 pip install -r requirements-dev.txt
