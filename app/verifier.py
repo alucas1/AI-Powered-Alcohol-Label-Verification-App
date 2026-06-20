@@ -84,7 +84,7 @@ def _compare_fuzzy(field: str, expected, extracted) -> FieldResult:
     exp, ext = _clean(expected), _clean(extracted)
     if not ext:
         return FieldResult(field, exp, "", Status.NEEDS_REVIEW,
-                           "No value could be read from the label — please review manually.")
+                           "No value could be read from the label. Please review manually.")
     if not exp:
         return FieldResult(field, "", ext, Status.NEEDS_REVIEW,
                            "No expected value was provided to compare against.")
@@ -98,7 +98,7 @@ def _compare_fuzzy(field: str, expected, extracted) -> FieldResult:
     score = fuzz.token_sort_ratio(_normalize(exp), _normalize(ext))
     if score >= 90:
         return FieldResult(field, exp, ext, Status.WARNING,
-                           f"Close match ({score:.0f}% similar) — likely the same value, please confirm.")
+                           f"Close match ({score:.0f}% similar). Likely the same value, but please confirm.")
     return FieldResult(field, exp, ext, Status.FAIL,
                        f"Does not match (only {score:.0f}% similar).")
 
@@ -123,7 +123,7 @@ def _to_float(number: str) -> float:
 def _parse_alcohol(text: str):
     """Return (abv_percent, proof) as floats; either may be None.
 
-    A label can print more than one percentage — "100% Agave ... 40% Alc./Vol."
+    A label can print more than one percentage, such as "100% Agave ... 40% Alc./Vol."
     Prefer the percentage anchored to an alcohol keyword; fall back to the lone
     percentage when there's only one. When several are present and none is
     anchored, leave ABV unset so the comparison defers to manual review rather
@@ -155,14 +155,14 @@ def _compare_alcohol(field: str, expected, extracted) -> FieldResult:
     exp, ext = _clean(expected), _clean(extracted)
     if not ext:
         return FieldResult(field, exp, "", Status.NEEDS_REVIEW,
-                           "No alcohol content could be read from the label — please review manually.")
+                           "No alcohol content could be read from the label. Please review manually.")
 
     exp_abv, exp_proof = _parse_alcohol(exp)
     ext_abv, ext_proof = _parse_alcohol(ext)
 
     if ext_abv is None and ext_proof is None:
         return FieldResult(field, exp, ext, Status.NEEDS_REVIEW,
-                           "Could not interpret the alcohol content on the label — please review manually.")
+                           "Could not interpret the alcohol content on the label. Please review manually.")
 
     # Prefer comparing ABV percentages when both are available.
     if exp_abv is not None and ext_abv is not None:
@@ -182,7 +182,7 @@ def _compare_alcohol(field: str, expected, extracted) -> FieldResult:
                            f"Proof differs (expected {exp_proof}, label shows {ext_proof}).")
 
     return FieldResult(field, exp, ext, Status.NEEDS_REVIEW,
-                       "Alcohol content could not be compared automatically — please review manually.")
+                       "Alcohol content could not be compared automatically. Please review manually.")
 
 
 _UNIT_TO_ML = {
@@ -213,12 +213,12 @@ def _compare_net_contents(field: str, expected, extracted) -> FieldResult:
     exp, ext = _clean(expected), _clean(extracted)
     if not ext:
         return FieldResult(field, exp, "", Status.NEEDS_REVIEW,
-                           "No net contents could be read from the label — please review manually.")
+                           "No net contents could be read from the label. Please review manually.")
 
     exp_ml, ext_ml = _parse_volume_ml(exp), _parse_volume_ml(ext)
     if ext_ml is None or exp_ml is None:
         return FieldResult(field, exp, ext, Status.NEEDS_REVIEW,
-                           "Net contents could not be parsed into a comparable quantity — please review manually.")
+                           "Net contents could not be parsed into a comparable quantity. Please review manually.")
 
     if abs(exp_ml - ext_ml) <= max(0.01 * exp_ml, 0.5):  # ~1% tolerance
         return FieldResult(field, exp, ext, Status.PASS, "Net contents match.")
@@ -230,7 +230,7 @@ def _compare_warning(field: str, expected, extracted) -> FieldResult:
     exp, ext = _clean(expected), _clean(extracted)
     if not ext:
         return FieldResult(field, exp, "", Status.NEEDS_REVIEW,
-                           "No government warning text was detected on the label — please review manually.")
+                           "No government warning text was detected on the label. Please review manually.")
 
     # Collapse whitespace (but keep case and punctuation) before any comparison.
     # Transcriptions routinely break the header across lines or double-space it;
