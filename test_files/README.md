@@ -32,7 +32,7 @@ Every row uses the standard TTB health warning as the expected text:
 GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects. (2) Consumption of alcoholic beverages impairs your ability to drive a car or operate machinery, and may cause health problems.
 ```
 
-Visual formatting of the warning — bold header, type size, placement — can't be
+Visual formatting of the warning (bold header, type size, placement) can't be
 judged from a text transcription, so the app surfaces it as a separate manual
 checkbox rather than an automated field. The per-file tables below cover only the
 automated comparisons.
@@ -52,12 +52,12 @@ automated comparisons.
 ² `Stone's Throw` and `STONE'S THROW` differ only in case and punctuation, which
   the comparison normalizes away.
 
-### old_tom_distillery.png — clean pass
+### old_tom_distillery.png: clean pass
 
 Positive control. The CSV values match the label, so every automated field
 passes.
 
-### silver_coast.png — brand-extraction wrinkle
+### silver_coast.png: brand-extraction wrinkle
 
 Built to pass. The only nuance is the brand: `DISTILLING CO.` is set on its own
 line, so the model may return the full `SILVER COAST DISTILLING CO.` or just
@@ -65,20 +65,20 @@ line, so the model may return the full `SILVER COAST DISTILLING CO.` or just
 threshold rather than warning, which is the realistic trade-off for a strict
 brand check.
 
-### stones_throw.png — failing alcohol content
+### stones_throw.png: failing alcohol content
 
 The CSV expects `45% Alc./Vol. (90 Proof)`; the label prints
 `47% Alc./Vol. (94 Proof)`, so alcohol content fails on a real numeric
 difference. The brand differs only in case (`Stone's Throw` vs `STONE'S THROW`)
 and still passes.
 
-### monarch_hill.png — failing government warning
+### monarch_hill.png: failing government warning
 
 The warning fails on two counts:
 
 1. The header reads `Government Warning:` instead of the required all-caps
    `GOVERNMENT WARNING:`.
-2. The wording diverges from the standard text — `pregnant women` for `women
+2. The wording diverges from the standard text: `pregnant women` for `women
    should not drink alcoholic beverages during pregnancy`, and `Consumption of
    alcohol` for `Consumption of alcoholic beverages`.
 
