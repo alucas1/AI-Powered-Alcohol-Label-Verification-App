@@ -100,7 +100,7 @@ def _manual_review_row(filename: str, confirmed: bool) -> dict:
         "explanation": (
             "Reviewer confirmed the warning's visual formatting by eye."
             if confirmed
-            else "Not confirmed — visual formatting still needs manual review."
+            else "Not confirmed. Visual formatting still needs manual review."
         ),
     }
 
