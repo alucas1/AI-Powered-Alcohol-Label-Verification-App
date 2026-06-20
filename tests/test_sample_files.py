@@ -152,13 +152,14 @@ def test_visual_format_row_flags_each_sample_for_review():
 #            NEEDS REVIEW (e.g. the model couldn't read the class) is tolerated
 #            because it defers to a human rather than asserting a mismatch.
 #   "noisy": not asserted. The model drops trailing brand words run to run:
-#            stones_throw reads as "Stone's Throw Spirits" and silver_coast as
-#            "Silver Coast" (no "Distilling Co."), each fuzzy-failing the CSV brand
-#            on some runs and matching on others. That's a real extraction quirk,
-#            not a signal worth gating the suite on.
+#            old_tom reads as "Old Tom" (no "Distillery"), stones_throw as
+#            "Stone's Throw Spirits", and silver_coast as "Silver Coast" (no
+#            "Distilling Co."), each fuzzy-failing the CSV brand on some runs and
+#            matching on others. That's a real extraction quirk, not a signal
+#            worth gating the suite on.
 EXPECTED_OUTCOMES = {
     "old_tom_distillery.png": {
-        "Brand Name": "pass", "Class/Type": "pass", "Alcohol Content": "pass",
+        "Brand Name": "noisy", "Class/Type": "pass", "Alcohol Content": "pass",
         "Net Contents": "pass", "Government Warning": "pass",
     },
     "silver_coast.png": {
