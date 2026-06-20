@@ -8,21 +8,20 @@ time. Images stay in memory; nothing is persisted.
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-from batch import expected_for, load_expected_csv, missing_fields, results_to_csv
-from label_ai import ExtractionError, MissingAPIKeyError, extract_label_fields
+from batch import load_expected_csv, missing_fields, results_to_csv
+from label_ai import MissingAPIKeyError
+from pipeline import MAX_WORKERS, process_batch
 from verifier import (
     STANDARD_WARNING,
     STATUS_LABEL,
     VISUAL_FORMAT_NOTE,
     FieldResult,
     Status,
-    verify,
 )
 
 st.set_page_config(page_title="Alcohol Label Verification", layout="wide")
@@ -55,7 +54,7 @@ def _overall(results: list[FieldResult]):
     """Worst status across fields, as a single (message, st-method) banner."""
     statuses = {r.status for r in results}
     if Status.FAIL in statuses:
-        return "Issues found — this label does not match the application.", "error"
+        return "Issues found. This label does not match the application.", "error"
     if Status.NEEDS_REVIEW in statuses:
         return "Some fields need manual review.", "warning"
     if Status.WARNING in statuses:
@@ -83,8 +82,8 @@ def _render_table(results: list[FieldResult], overrides: dict[int, tuple[str, st
         rows.append(
             {
                 "Field": r.field,
-                "Expected": _truncate(r.expected) or "—",
-                "Extracted from Label": _truncate(r.extracted) or "—",
+                "Expected": _truncate(r.expected) or "(none)",
+                "Extracted from Label": _truncate(r.extracted) or "(none)",
                 "Status": status,
                 "Explanation": explanation,
             }
@@ -112,13 +111,15 @@ st.write(
 with st.expander("How to use this app"):
     st.markdown(
         """
-**What it does** — Reads each uploaded label with a vision model and checks it,
-field by field, against the expected values from the application.
+**What it does:** Reads each uploaded label and checks it, field by field,
+against the expected values from the application.
 
 **Steps**
 1. Enter the expected values, or upload a per-file CSV for a batch of different labels.
 2. Upload one or more label images (PNG or JPG).
 3. Click **Verify Labels**.
+4. Review each result. If you disagree with an automated check, use the
+   **Overrides** panel to set the field to PASS or FAIL yourself (see below).
 
 To see it in action, click **Run demo files** to verify four bundled sample
 labels automatically.
@@ -128,22 +129,22 @@ labels automatically.
 | Status | Meaning |
 |---|---|
 | PASS | Matches the application. |
-| WARNING | Minor difference, such as capitalization — confirm by eye. |
+| WARNING | Minor difference, such as capitalization. Confirm by eye. |
 | FAIL | Clear mismatch, or a formatting rule was broken. |
-| NEEDS REVIEW | Could not be read (glare or angle) — review by hand. |
+| NEEDS REVIEW | Could not be read (glare or angle). Review by hand. |
 
-**Government warning** — The app verifies the wording and capitalization
-automatically, but bold text, type size, placement, and separation from other
-copy cannot be reliably judged from an image by AI. Each result includes a manual
-check box to confirm those by eye.
+**Government warning:** The wording and capitalization are checked
+automatically. Bold text, type size, placement, and separation from other copy
+cannot be judged reliably from an image, so each result includes a check box for
+you to confirm those by eye.
 
-**Changing a result (overrides)** — If you disagree with an automated check, open
+**Changing a result (overrides):** If you disagree with an automated check, open
 the **Overrides** panel under that result, tick the field, and set it to PASS or
 FAIL with an optional reason. Overridden fields are marked "(manual)" in the table
 and the downloaded CSV. The summary at the top of each result always reflects the
-automated checks, so an override never hides what the model found.
+automated checks, so an override never hides what was found.
 
-**Results** — Each label shows its processing time (target: about five seconds).
+**Results:** Each label shows its processing time (target: about five seconds).
 After a batch, use **Download all results (CSV)** to export every field of every
 label, along with your visual-format confirmations and any overrides.
         """
@@ -186,7 +187,7 @@ with st.form("verification_form"):
     st.caption(
         "Verifying many different labels at once? Upload a CSV with columns "
         "`filename, brand_name, class_type, alcohol_content, net_contents, "
-        "government_warning` — one row per image. Each image is matched to its "
+        "government_warning`, one row per image. Each image is matched to its "
         "row by filename. Leave this empty to apply the values above to every image."
     )
     csv_file = st.file_uploader("Expected-values CSV", type=["csv"])
@@ -196,7 +197,7 @@ with st.form("verification_form"):
 # --- Processing: verify on submit, store the batch in session_state ----------
 #
 # Results are kept in session_state so they survive the rerun that a download
-# click triggers — the AI provider is never re-called just to redraw the page.
+# click triggers, so the provider is never re-called just to redraw the page.
 
 if submitted or run_demo:
     st.session_state.pop("batch", None)  # drop any previous run's results
@@ -246,51 +247,34 @@ if submitted or run_demo:
 
     batch = []
     total = len(files)
-    # st.status gives an animated spinner (keeps moving while the call blocks)
-    # plus an updatable label, so the reviewer sees which label is in flight.
-    with st.status(f"Processing {total} label{'s' if total != 1 else ''}…", expanded=False) as status:
-        for idx, (name, data) in enumerate(files):
-            status.update(label=f"Processed {idx}/{total} — Processing {name}…")
-            entry = {"name": name, "image": data}
+    plural = "s" if total != 1 else ""
+    # st.status gives an animated spinner (keeps moving while the calls block)
+    # plus an updatable label. Labels are extracted concurrently (up to
+    # MAX_WORKERS at once), so progress is reported as each one lands rather than
+    # as a single in-flight file.
+    with st.status(f"Processing {total} label{plural}…", expanded=False) as status:
 
-            if csv_map is not None:
-                expected = expected_for(name, csv_map)
-                if expected is None:
-                    entry["skip"] = (
-                        "No row for this file in the CSV — skipped. Add a row with this "
-                        "exact filename, or remove the CSV to use the shared values."
-                    )
-                    batch.append(entry)
-                    continue
-                row_missing = missing_fields(expected)
-                if row_missing:
-                    entry["skip"] = "CSV row is missing " + ", ".join(row_missing) + " — skipped."
-                    batch.append(entry)
-                    continue
-            else:
-                expected = shared_expected
+        def _on_progress(done: int, total: int, name: str) -> None:
+            status.update(label=f"Processed {done} of {total} (last: {name})")
 
-            try:
-                start = time.perf_counter()
-                extracted = extract_label_fields(data)
-                entry["elapsed"] = time.perf_counter() - start
-            except MissingAPIKeyError:
-                status.update(label="Stopped — no API key configured", state="error")
-                st.error(
-                    "**No OpenAI API key configured.** Add `OPENAI_API_KEY` to "
-                    "`.streamlit/secrets.toml` (local) or the app's **Secrets** "
-                    "settings (Streamlit Cloud), then try again."
-                )
-                st.stop()
-            except ExtractionError as exc:
-                entry["error"] = str(exc)
-                batch.append(entry)
-                continue
+        try:
+            batch = process_batch(
+                files,
+                csv_map=csv_map,
+                shared_expected=shared_expected,
+                max_workers=MAX_WORKERS,
+                on_progress=_on_progress,
+            )
+        except MissingAPIKeyError:
+            status.update(label="Stopped: no API key configured", state="error")
+            st.error(
+                "**No OpenAI API key configured.** Add `OPENAI_API_KEY` to "
+                "`.streamlit/secrets.toml` (local) or the app's **Secrets** "
+                "settings (Streamlit Cloud), then try again."
+            )
+            st.stop()
 
-            entry["results"] = verify(expected, extracted)
-            batch.append(entry)
-
-        status.update(label=f"Verified {total} label{'s' if total != 1 else ''}", state="complete")
+        status.update(label=f"Verified {total} label{plural}", state="complete")
 
     st.session_state["batch"] = batch
 
@@ -357,14 +341,14 @@ if batch:
             if warning is not None:
                 with st.expander("Show full government warning"):
                     st.markdown("**Expected**")
-                    st.write(warning.expected or "—")
+                    st.write(warning.expected or "(none)")
                     st.markdown("**Extracted from label**")
-                    st.write(warning.extracted or "—")
+                    st.write(warning.extracted or "(none)")
 
             # Visual format can't be verified from a transcription. Surface it as
             # an explicit manual step the reviewer ticks off (not persisted).
             with st.container(border=True):
-                st.markdown("**Visual format — manual check**")
+                st.markdown("**Visual format: manual check**")
                 st.caption(VISUAL_FORMAT_NOTE)
                 confirmations[i] = st.checkbox(
                     "I've confirmed the warning's visual formatting by eye.",
