@@ -15,10 +15,19 @@ import base64
 import io
 import json
 import os
-from typing import Optional
+import random
+import time
+from email.utils import parsedate_to_datetime
+from typing import Callable, Optional, TypeVar
 
 import streamlit as st
-from openai import OpenAI
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    InternalServerError,
+    OpenAI,
+    RateLimitError,
+)
 from PIL import Image
 from pydantic import BaseModel, ValidationError
 
@@ -33,6 +42,23 @@ MAX_IMAGE_EDGE = 1600
 # surfaced in the UI; this is the safety net that turns a hung request into a
 # clean ExtractionError instead of an indefinite wait.
 REQUEST_TIMEOUT = 30.0
+
+# Transient failures worth retrying: a 429 rate limit, a 5xx from the provider,
+# or a connection/timeout blip. Everything else (a 400 bad request, a 401 auth
+# failure) is a hard error that retrying would only delay, so it surfaces at once.
+RETRYABLE_ERRORS = (RateLimitError, InternalServerError, APITimeoutError, APIConnectionError)
+
+# Backoff schedule for those transient failures. Concurrency makes a burst of
+# requests far more likely to brush the provider's rate limit, so the client
+# retries with exponential backoff and full jitter, which spreads the retries
+# out instead of having every throttled worker wake at the same instant and
+# collide again. MAX_RETRIES is the retry count after the first attempt; the SDK's
+# own retry layer is disabled (max_retries=0) so this is the only one in play.
+MAX_RETRIES = 4
+RETRY_BASE_DELAY = 0.5  # seconds; the first backoff is drawn from [0, this]
+RETRY_MAX_DELAY = 8.0  # seconds; ceiling on any single backoff
+
+T = TypeVar("T")
 
 
 class LabelFields(BaseModel):
@@ -103,6 +129,68 @@ def get_model() -> str:
     return model or DEFAULT_MODEL
 
 
+def _retry_after_seconds(exc: Exception) -> Optional[float]:
+    """The provider's requested wait from a ``Retry-After`` header, if it sent one.
+
+    A 429 often carries ``Retry-After`` telling us exactly how long to hold off,
+    as either a number of seconds or an HTTP date. Honoring it beats guessing.
+    Returns None when there's no usable header (e.g. a timeout, which has no
+    response), so the caller falls back to computed backoff.
+    """
+    response = getattr(exc, "response", None)
+    if response is None:
+        return None
+    raw = response.headers.get("retry-after")
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        pass
+    try:
+        retry_at = parsedate_to_datetime(raw)
+    except (TypeError, ValueError):
+        return None
+    import datetime as _dt
+
+    now = _dt.datetime.now(retry_at.tzinfo) if retry_at.tzinfo else _dt.datetime.now()
+    return max(0.0, (retry_at - now).total_seconds())
+
+
+def _backoff_delay(attempt: int) -> float:
+    """Full-jitter exponential backoff for retry ``attempt`` (0-indexed).
+
+    A delay drawn uniformly from ``[0, min(cap, base * 2**attempt)]``. The jitter
+    is the point: it decorrelates the retries of workers that were throttled
+    together so they don't all retry in lockstep.
+    """
+    ceiling = min(RETRY_MAX_DELAY, RETRY_BASE_DELAY * (2 ** attempt))
+    return random.uniform(0, ceiling)
+
+
+def _with_retry(
+    call: Callable[[], T],
+    *,
+    max_retries: int = MAX_RETRIES,
+    sleep: Callable[[float], None] = time.sleep,
+) -> T:
+    """Call ``call``, retrying transient failures with backoff.
+
+    Retries only on RETRYABLE_ERRORS, up to ``max_retries`` times, sleeping a
+    ``Retry-After``-aware backoff between attempts. Non-retryable errors and the
+    final failure propagate to the caller. ``sleep`` is injectable so tests can
+    exercise the schedule without waiting.
+    """
+    for attempt in range(max_retries + 1):
+        try:
+            return call()
+        except RETRYABLE_ERRORS as exc:
+            if attempt == max_retries:
+                raise
+            wait = _retry_after_seconds(exc)
+            sleep(wait if wait is not None else _backoff_delay(attempt))
+
+
 def _prepare_image(image_bytes: bytes) -> bytes:
     """Decode, downscale, and re-encode an uploaded image entirely in memory.
 
@@ -130,12 +218,14 @@ def extract_label_fields(image_bytes: bytes) -> LabelFields:
         ExtractionError: if the image is unreadable, the API call fails, or the
             response is not valid JSON in the expected shape.
     """
-    client = OpenAI(api_key=get_api_key())
+    # max_retries=0 hands all retry/backoff to _with_retry below, so there's a
+    # single, observable schedule rather than two layers compounding each other.
+    client = OpenAI(api_key=get_api_key(), max_retries=0)
     prepared = _prepare_image(image_bytes)
     b64 = base64.b64encode(prepared).decode("ascii")
 
-    try:
-        response = client.chat.completions.create(
+    def _create():
+        return client.chat.completions.create(
             model=get_model(),
             temperature=0,
             timeout=REQUEST_TIMEOUT,
@@ -157,6 +247,9 @@ def extract_label_fields(image_bytes: bytes) -> LabelFields:
                 },
             ],
         )
+
+    try:
+        response = _with_retry(_create)
     except Exception as exc:
         raise ExtractionError(f"The AI service could not process this image ({exc}).") from exc
 
