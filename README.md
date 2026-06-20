@@ -12,7 +12,8 @@ result back in roughly five seconds per label.
 
 ## What it does
 
-- Accepts one or more label images (PNG/JPG); a batch is processed one image at a time.
+- Accepts one or more label images (PNG/JPG); a batch is processed concurrently,
+  up to five labels at a time.
 - Takes the expected values for five fields: brand name, class/type, alcohol
   content, net contents, and the government warning (pre-filled with the standard
   TTB text).
@@ -57,21 +58,21 @@ A few behaviors are worth calling out:
   without preparing your own inputs.
 - **In-app help.** A collapsible **How to use this app** panel at the top covers
   the steps, what each status means, and the expected behavior.
-- **Required fields.** All five expected values — brand name, class/type, alcohol
-  content, net contents, and the government warning — must be filled in before a
+- **Required fields.** All five expected values (brand name, class/type, alcohol
+  content, net contents, and the government warning) must be filled in before a
   label is verified. Submitting with any blank lists the missing fields and stops
-  before any AI call, so an incomplete form never burns an API request.
+  before any model call, so an incomplete form never burns an API request.
 - **Batch expected values.** By default one set of expected values applies to
   every uploaded image, i.e. several photos of the same application. To verify
   different labels in one pass, upload an optional CSV with columns `filename,
-  brand_name, class_type, alcohol_content, net_contents, government_warning` — one
+  brand_name, class_type, alcohol_content, net_contents, government_warning`, one
   row per image. Each image is matched to its row by filename (case-insensitive).
   A file with no matching row, or a row missing required values, is flagged and
   skipped rather than verified against the wrong data.
 - **Warning visual formatting.** Wording and header capitalization are checked
   automatically, but type size, weight, placement, and separation from other copy
   can't be judged from a text transcription. Each result therefore carries a
-  **Visual format — manual check** box with a checkbox the reviewer ticks once
+  **Visual format: manual check** box with a checkbox the reviewer ticks once
   they've confirmed bold `GOVERNMENT WARNING:`, legibility, type size, and
   placement by eye. It's a reviewer acknowledgment, kept separate from the
   automated grid; it doesn't change the pass/fail verdict and isn't persisted.
@@ -89,8 +90,8 @@ A few behaviors are worth calling out:
   the lag is visible. A hard request timeout (`REQUEST_TIMEOUT` in `label_ai.py`)
   turns a hung call into a clean, user-facing error instead of an indefinite wait.
 - **Downloadable results.** Once a batch is verified, a **Download all results
-  (CSV)** button exports every field of every label into one file — `filename,
-  field, expected, extracted, status, explanation` — for record-keeping or review
+  (CSV)** button exports every field of every label into one file (`filename,
+  field, expected, extracted, status, explanation`) for record-keeping or review
   away from the app. Each label also gets a `Manual Visual Format Review` row whose
   status reflects its checkbox (`YES`/`NO`), so ticking a box updates the download.
   Skipped or unreadable files are left out. Results are held in session state, so
@@ -106,10 +107,12 @@ or the comparison rules:
 ├── .streamlit/                 # config.toml + secrets, resolved from the run directory
 ├── app/
 │   ├── app.py                  # Streamlit UI and orchestration
-│   ├── label_ai.py             # the only module that calls the AI provider
+│   ├── label_ai.py             # the only module that calls the AI provider (with retry/backoff)
+│   ├── pipeline.py             # concurrent batch fan-out; no UI, no provider details
 │   ├── batch.py                # CSV validation/loading and results export
 │   └── verifier.py             # comparison logic; no UI, no network
-├── tests/                      # pytest suite, one file per concern
+├── tests/                      # pytest suite, one file per concern (see tests/README.md)
+│   ├── README.md
 │   ├── test_text_fields.py
 │   ├── test_alcohol.py
 │   ├── test_net_contents.py
@@ -117,6 +120,8 @@ or the comparison rules:
 │   ├── test_warning_visual_format.py
 │   ├── test_validation.py
 │   ├── test_batch.py
+│   ├── test_pipeline.py        # concurrent batch orchestration: order, bound, skips, progress
+│   ├── test_retry.py           # provider retry/backoff schedule
 │   ├── test_verify.py
 │   ├── test_sample_files.py    # end-to-end checks over the bundled sample set
 │   └── make_sample_labels.py   # generates a synthetic label for local testing
@@ -132,8 +137,13 @@ or the comparison rules:
 run the app from the root: `streamlit run app/app.py`.
 
 Each image goes to the model in one call that returns a single structured JSON
-object, which keeps latency within the per-label budget. Uploaded images are held
-in memory and never written to disk.
+object, which keeps latency within the per-label budget. A batch fans those calls
+out across a bounded thread pool (`pipeline.py`, five workers by default) so a
+large upload finishes in roughly the time of its slowest few labels rather than
+the sum of all of them. The work is network-bound, so threads overlap the waits.
+The provider call carries its own retry/backoff for rate limits and transient
+errors (`label_ai.py`), which matters once requests go out concurrently. Uploaded
+images are held in memory and never written to disk.
 
 ## Setup
 
@@ -182,8 +192,12 @@ python tests/make_sample_labels.py   # writes sample_labels/old_tom_distillery.p
 ### Tests
 
 The pytest suite covers the deterministic logic: `verifier.py`'s field
-comparisons, `batch.py`'s validation, CSV loading, and results export, plus an
-end-to-end pass over the bundled sample set.
+comparisons, `batch.py`'s validation, CSV loading, and results export,
+`pipeline.py`'s concurrent fan-out (ordering, the worker bound, skips, per-file
+error isolation, progress), `label_ai.py`'s retry/backoff schedule, plus an
+end-to-end pass over the bundled sample set. The concurrency and retry tests
+inject fakes for the thread pool's work and the sleep, so they stay deterministic
+and never touch the network.
 
 ```bash
 pip install -r requirements-dev.txt
@@ -195,7 +209,7 @@ sample images to the model and validates the results. It runs by default, but
 only after a precheck confirms a usable key and a reachable model: the precheck
 calls `models.retrieve` to prove both the key and the configured model are valid,
 and if either isn't (no key, bad key, unknown model, no network) the live tests
-skip with the reason rather than fail — so an offline checkout still passes. These
+skip with the reason rather than fail, so an offline checkout still passes. These
 calls hit the real API, cost money, and vary slightly between runs, so a single
 failure is worth a re-run before treating it as a regression. To opt out even when
 a valid key is present:
@@ -251,10 +265,10 @@ model's standard token rate; there is no separate per-image charge.
 | `gpt-5.4` | $2.50 | $15.00 | ~$0.0075 | ~$7.50 |
 
 **At TTB's scale.** The Compliance Division reviews roughly 150,000 applications a
-year. Running every one through the default model costs on the order of **$90–100
-a year** in API spend; the mid tier is about **$340**, and the largest model about
-**$1,100**. Even with retries and multiple images per application, this stays in
-the low hundreds to low thousands of dollars annually — set against the $4.2M
+year. Running every one through the default model costs on the order of **$90 to
+$100 a year** in API spend; the mid tier is about **$340**, and the largest model
+about **$1,100**. Even with retries and multiple images per application, this stays
+in the low hundreds to low thousands of dollars annually. Set against the $4.2M
 quoted for a COLA rebuild, the model cost is not the deciding factor.
 
 **Why the default is the cheapest tier.** The model only transcribes text; every
@@ -267,9 +281,9 @@ without a code change, and the table above bounds the cost of doing so.
 **Further reductions.** Two OpenAI features apply directly to this workload but
 are not enabled in the prototype:
 
-- **Batch API** — the importer use case (200–300 labels dropped at once) is a
+- **Batch API.** The importer use case (200 to 300 labels dropped at once) is a
   natural fit for asynchronous batch submission, which lists at a 50% discount.
-- **Prompt caching** — the system prompt is identical on every call, so caching
+- **Prompt caching.** The system prompt is identical on every call, so caching
   its prefix trims the input cost on repeated runs.
 
 Prices move; verify against [OpenAI's pricing page](https://openai.com/api/pricing/)
@@ -291,13 +305,27 @@ It's a prototype, and a few choices reflect that:
 - The warning check covers header casing and exact wording, both of which survive
   a text transcription, and deliberately stops there. TTB also requires the
   warning to be bold, legible at a type size that scales with container size, a
-  continuous paragraph, and set apart from other copy — none of which a
+  continuous paragraph, and set apart from other copy, none of which a
   transcription can prove. Rather than let the model guess at the most legally
   sensitive field, the app surfaces visual formatting as a manual confirmation the
   reviewer ticks off (recorded as `YES`/`NO` in the results CSV), keeping that
   judgment with a person.
 - Output quality tracks image quality. Bad angle, glare, or lighting yields
   NEEDS REVIEW rather than a confident-but-wrong PASS or FAIL.
+- Batches run concurrently with a small fixed worker cap (five). The cap is
+  deliberate: the speedup comes from overlapping network waits, not from CPU, and
+  pushing more concurrent requests mainly trades latency for rate-limit errors. A
+  production tool would tune this against the provider's actual quota. To stay
+  within order on the result list, completions are reordered back to the upload
+  sequence, and a file with no usable expected values is skipped before any call
+  is spent on it.
+- The provider call retries transient failures (a 429 rate limit, a 5xx, or a
+  connection/timeout blip) with exponential backoff and full jitter, honoring a
+  `Retry-After` header when the server sends one. Hard errors (a 400 or an auth
+  failure) are not retried; they fail fast. The SDK's own retry layer is turned
+  off so there is a single, testable schedule rather than two compounding. The
+  backoff bounds (`MAX_RETRIES`, `RETRY_BASE_DELAY`, `RETRY_MAX_DELAY`) and the
+  worker cap (`MAX_WORKERS`) are module constants, easy to lift to configuration.
 
 ## Out of scope for production
 
@@ -320,6 +348,7 @@ address at least:
 ## Future work
 
 - Pull per-image expected values from COLA instead of a hand-authored CSV.
-- Parallelize batch extraction to hold the latency budget on large batches.
+- Make the worker cap and backoff bounds configurable, and tune them against the
+  provider's real quota rather than the conservative defaults shipped here.
 - Surface per-field confidence and bounding-box highlights.
 - Make tolerances configurable and TTB-calibrated per beverage type.
