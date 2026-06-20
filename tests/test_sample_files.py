@@ -137,7 +137,7 @@ def test_visual_format_row_flags_each_sample_for_review():
 
 # --- live: real round-trip through the AI provider ----------------------------
 #
-# DISCLAIMER — these tests call the live vision model and are NOT deterministic.
+# DISCLAIMER: these tests call the live vision model and are NOT deterministic.
 # The model's reads drift between runs: OCR, line breaks, and capitalization
 # shift, an occasional field comes back unreadable, and a label may carry extra
 # words the prompt can't help folding in. Re-run before treating a single failure
@@ -145,13 +145,13 @@ def test_visual_format_row_flags_each_sample_for_review():
 #
 # To stay meaningful without being flaky, each field is checked by intent rather
 # than by an exact status:
-#   "fail" — the verifier MUST return FAIL. These are the two violations the
+#   "fail":  the verifier MUST return FAIL. These are the two violations the
 #            sample set is built around (stones_throw's wrong alcohol content and
 #            monarch_hill's malformed warning), and they hold run to run.
-#   "pass" — the field must simply NOT FAIL. PASS and WARNING are matches; a
+#   "pass":  the field must simply NOT FAIL. PASS and WARNING are matches; a
 #            NEEDS REVIEW (e.g. the model couldn't read the class) is tolerated
 #            because it defers to a human rather than asserting a mismatch.
-#   "noisy" — not asserted. The model drops trailing brand words run to run:
+#   "noisy": not asserted. The model drops trailing brand words run to run:
 #            stones_throw reads as "Stone's Throw Spirits" and silver_coast as
 #            "Silver Coast" (no "Distilling Co."), each fuzzy-failing the CSV brand
 #            on some runs and matching on others. That's a real extraction quirk,
@@ -181,7 +181,7 @@ def live_extraction_ready():
     """Precondition for the live tests: a usable key and a reachable model.
 
     Runs before the live extraction tests and gates them. The credentials are
-    proven, not assumed — `models.retrieve` exercises both the key (auth) and the
+    proven, not assumed. `models.retrieve` exercises both the key (auth) and the
     configured model (existence and access) in one lightweight call. Any failure
     (no key, bad key, unknown model, no network) skips the live tests with the
     reason instead of failing them, so a checkout without credentials stays green.
@@ -193,7 +193,7 @@ def live_extraction_ready():
     try:
         key = get_api_key()
     except MissingAPIKeyError:
-        pytest.skip("no OpenAI API key configured — set OPENAI_API_KEY to run the live tests")
+        pytest.skip("no OpenAI API key configured; set OPENAI_API_KEY to run the live tests")
 
     from openai import OpenAI
 
@@ -209,7 +209,7 @@ def live_extraction_ready():
 def test_live_extraction_matches_expected_outcomes(live_extraction_ready, csv_map, name):
     """Read the image with the live model, verify it against the CSV's expected
     values, and check each field's outcome. See the disclaimer above: model
-    output varies between runs, so a single failure may be noise — re-run."""
+    output varies between runs, so a single failure may be noise; re-run."""
     from label_ai import extract_label_fields
 
     extracted = extract_label_fields((TEST_FILES / name).read_bytes())
@@ -217,7 +217,7 @@ def test_live_extraction_matches_expected_outcomes(live_extraction_ready, csv_ma
 
     for field, outcome in EXPECTED_OUTCOMES[name].items():
         r = results[field]
-        detail = f"{name} / {field}: label read {r.extracted!r} — {r.explanation}"
+        detail = f"{name} / {field}: label read {r.extracted!r} ({r.explanation})"
         if outcome == "fail":
             assert r.status is Status.FAIL, f"expected FAIL, got {r.status.value}. {detail}"
         elif outcome == "pass":
